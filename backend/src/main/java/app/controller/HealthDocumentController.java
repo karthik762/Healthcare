@@ -1,0 +1,240 @@
+
+package app.controller;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+
+import app.model.HealthDocument;
+import app.services.AiSummaryService;
+import app.services.HealthDocumentService;
+
+@RestController
+@RequestMapping("/api/documents")
+public class HealthDocumentController {
+
+    private final HealthDocumentService service;
+    private final AiSummaryService aiSummaryService;
+
+    public HealthDocumentController(
+            HealthDocumentService service,
+            AiSummaryService aiSummaryService) {
+
+        this.service = service;
+        this.aiSummaryService = aiSummaryService;
+    }
+
+    // Return only the fields required by the frontend
+    private Map<String, Object> documentResponse(
+            HealthDocument document) {
+
+        return Map.of(
+                "id", document.getId(),
+                "title", document.getTitle() == null
+                        ? "" : document.getTitle(),
+                "documentType", document.getDocumentType() == null
+                        ? "" : document.getDocumentType(),
+                "content", document.getContent() == null
+                        ? "" : document.getContent(),
+                "createdAt", document.getCreatedAt() == null
+                        ? "" : document.getCreatedAt().toString(),
+                "updatedAt", document.getUpdatedAt() == null
+                        ? "" : document.getUpdatedAt().toString()
+        );
+    }
+
+    // Get all documents belonging to the logged-in user
+    @GetMapping
+    public List<Map<String, Object>> getAllDocuments() {
+
+        return service.getAllDocuments()
+                .stream()
+                .map(this::documentResponse)
+                .toList();
+    }
+
+    // Get one document belonging to the logged-in user
+    @GetMapping("/{id}")
+    public ResponseEntity<Map<String, Object>> getDocument(
+            @PathVariable Long id) {
+
+        return service.getDocumentById(id)
+                .map(document ->
+                        ResponseEntity.ok(documentResponse(document)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    // Create a document for the logged-in user
+    @PostMapping
+    public Map<String, Object> createDocument(
+            @RequestBody HealthDocument document) {
+
+        HealthDocument savedDocument =
+                service.createDocument(document);
+
+        return documentResponse(savedDocument);
+    }
+
+    // Update only a document owned by the logged-in user
+    @PutMapping("/{id}")
+    public ResponseEntity<Map<String, Object>> updateDocument(
+            @PathVariable Long id,
+            @RequestBody HealthDocument document) {
+
+        return service.updateDocument(id, document)
+                .map(updated ->
+                        ResponseEntity.ok(documentResponse(updated)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    // Delete only a document owned by the logged-in user
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteDocument(
+            @PathVariable Long id) {
+
+        if (!service.deleteDocument(id)) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.noContent().build();
+    }
+
+    // Upload a TXT or PDF file and save its extracted text
+    @PostMapping(
+            value = "/upload-text",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ResponseEntity<?> uploadTextDocument(
+            @RequestParam("title") String title,
+            @RequestParam("documentType") String documentType,
+            @RequestParam("file") MultipartFile file) {
+
+        if (title == null || title.isBlank()) {
+            return ResponseEntity.badRequest()
+                    .body("Please enter a document title.");
+        }
+
+        if (documentType == null || documentType.isBlank()) {
+            return ResponseEntity.badRequest()
+                    .body("Please select a document type.");
+        }
+
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body("Please select a file.");
+        }
+
+        String filename = file.getOriginalFilename();
+
+        if (filename == null) {
+            return ResponseEntity.badRequest()
+                    .body("Invalid filename.");
+        }
+
+        String lowerFilename = filename.toLowerCase();
+
+        try {
+            String content;
+
+            if (lowerFilename.endsWith(".txt")) {
+
+                content = new String(
+                        file.getBytes(),
+                        StandardCharsets.UTF_8
+                );
+
+            } else if (lowerFilename.endsWith(".pdf")) {
+
+                try (PDDocument pdf =
+                             Loader.loadPDF(file.getBytes())) {
+
+                    PDFTextStripper stripper = new PDFTextStripper();
+                    content = stripper.getText(pdf);
+                }
+
+            } else {
+                return ResponseEntity.badRequest()
+                        .body("Only TXT and PDF files are supported.");
+            }
+
+            if (content.isBlank()) {
+                return ResponseEntity.badRequest()
+                        .body("No readable text was found in the file.");
+            }
+
+            HealthDocument document = new HealthDocument();
+            document.setTitle(title.trim());
+            document.setDocumentType(documentType.trim());
+            document.setContent(content);
+
+            // The service assigns the logged-in user as owner
+            HealthDocument savedDocument =
+                    service.createDocument(document);
+
+            return ResponseEntity.ok(
+                    documentResponse(savedDocument));
+
+        } catch (IOException exception) {
+
+            return ResponseEntity.badRequest()
+                    .body("Could not read the file. "
+                            + "Please check that it is a valid TXT or PDF.");
+        }
+    }
+
+    // Generate an AI summary only for the user's own document
+    @PostMapping("/{id}/summarize")
+    public ResponseEntity<Map<String, String>> summarizeDocument(
+            @PathVariable Long id) {
+
+        var documentOptional = service.getDocumentById(id);
+
+        if (documentOptional.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        try {
+            HealthDocument document = documentOptional.get();
+
+            String summary = aiSummaryService.summarize(
+                    document.getContent()
+            );
+
+            return ResponseEntity.ok(
+                    Map.of(
+                            "documentId", id.toString(),
+                            "title", document.getTitle(),
+                            "summary", summary
+                    )
+            );
+
+        } catch (Exception exception) {
+
+            return ResponseEntity.status(503).body(
+                    Map.of(
+                            "error",
+                            "Could not generate the summary. "
+                                    + "Check that Ollama is running "
+                                    + "and the model is available."
+                    )
+            );
+        }
+    }
+}
