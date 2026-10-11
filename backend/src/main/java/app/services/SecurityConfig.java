@@ -63,11 +63,15 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
 
         configuration.setAllowedOrigins(
-                List.of("http://localhost:5173", "http://127.0.0.1:5173"));
+                List.of(
+                        "http://localhost:5173",
+                        "http://127.0.0.1:5173",
+                        "https://healthcare-zeta-one.vercel.app"
+                ));
         configuration.setAllowedMethods(
                 List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(
-                List.of("Authorization", "Content-Type"));
+                List.of("Authorization", "Content-Type", "Accept"));
         configuration.setAllowCredentials(false);
 
         UrlBasedCorsConfigurationSource source =

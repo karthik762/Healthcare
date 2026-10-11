@@ -40,6 +40,7 @@ function App() {
         localStorage.removeItem("token");
         localStorage.removeItem("user");
         setCurrentUser(null);
+        setDocuments([]);
     };
 
     const [documents, setDocuments] = useState([]);
@@ -78,8 +79,10 @@ function App() {
     };
 
     useEffect(() => {
-        loadDocuments();
-    }, []);
+        if (currentUser) {
+            loadDocuments();
+        }
+    }, [currentUser]);
 
     // Clear the manual document form
     const resetForm = () => {

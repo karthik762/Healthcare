@@ -2,7 +2,7 @@
 import axios from "axios";
 
 const api = axios.create({
-    baseURL: "https://healthcare-hr1n.onrender.com/api"
+    baseURL: import.meta.env.VITE_API_BASE_URL || "https://healthcare-hr1n.onrender.com/api"
 });
 
 // Automatically attach the login token to each API request
