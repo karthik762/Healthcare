@@ -4,6 +4,7 @@ package app.services;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -12,9 +13,10 @@ public class AiSummaryService {
 
     private final RestClient restClient;
 
-    public AiSummaryService() {
+    public AiSummaryService(
+            @Value("${app.ollama.base-url:http://localhost:11434}") String ollamaBaseUrl) {
         this.restClient = RestClient.builder()
-                .baseUrl("http://localhost:11434")
+                .baseUrl(ollamaBaseUrl)
                 .build();
     }
 

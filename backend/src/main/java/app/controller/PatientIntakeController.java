@@ -62,36 +62,52 @@ public class PatientIntakeController {
 
     // Send a patient message and receive the next question
     @PostMapping("/{id}/message")
-    public Map<String, Object> sendMessage(
+    public ResponseEntity<Map<String, Object>> sendMessage(
             @PathVariable Long id,
             @RequestBody Map<String, String> request) {
 
-        String message = request.get("message");
+        String message = request != null ? request.get("message") : null;
+        if (message == null || message.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "Please enter a message.")
+            );
+        }
 
-        String reply = intakeService.sendMessage(id, message);
+        try {
+            String reply = intakeService.sendMessage(id, message);
+            PatientIntakeSession session = intakeService.getSession(id);
 
-        PatientIntakeSession session = intakeService.getSession(id);
-
-        return Map.of(
-                "sessionId", session.getId(),
-                "reply", reply,
-                "status", session.getStatus()
-        );
+            return ResponseEntity.ok(Map.of(
+                    "sessionId", session.getId(),
+                    "reply", reply,
+                    "status", session.getStatus()
+            ));
+        } catch (RuntimeException exception) {
+            int status = exception.getMessage().contains("not found") ? 404 : 400;
+            return ResponseEntity.status(status).body(
+                    Map.of("error", exception.getMessage())
+            );
+        }
     }
 
     // Generate the doctor summary
     @PostMapping("/{id}/summary")
-    public Map<String, Object> generateSummary(@PathVariable Long id) {
+    public ResponseEntity<Map<String, Object>> generateSummary(@PathVariable Long id) {
+        try {
+            String summary = intakeService.generateDoctorSummary(id);
+            PatientIntakeSession session = intakeService.getSession(id);
 
-        String summary = intakeService.generateDoctorSummary(id);
-
-        PatientIntakeSession session = intakeService.getSession(id);
-
-        return Map.of(
-                "sessionId", session.getId(),
-                "summary", summary,
-                "status", session.getStatus()
-        );
+            return ResponseEntity.ok(Map.of(
+                    "sessionId", session.getId(),
+                    "summary", summary,
+                    "status", session.getStatus()
+            ));
+        } catch (RuntimeException exception) {
+            int status = exception.getMessage().contains("not found") ? 404 : 400;
+            return ResponseEntity.status(status).body(
+                    Map.of("error", exception.getMessage())
+            );
+        }
     }
 
     // Retrieve a session without returning its User object
