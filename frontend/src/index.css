@@ -1,3 +1,106 @@
-body {
-    margin: 0;
+/* ==========================================================================
+   HealthSummarizer × Lycoris Design System — Global Tokens & Baseline
+   ========================================================================== */
+
+:root {
+  --bg-main: #080808;
+  --bg-card: #111111;
+  --bg-card-hover: #161616;
+  --bg-surface: #171717;
+  --bg-subtle: #1e1e1e;
+  --bg-input: #0c0c0c;
+
+  --text-ivory: #F2EBDD;
+  --text-muted: #B6B095;
+  --text-dim: #787361;
+
+  --accent-crimson: #E3131B;
+  --accent-crimson-hover: #ff252e;
+  --accent-crimson-glow: rgba(227, 19, 27, 0.32);
+  --accent-crimson-subtle: rgba(227, 19, 27, 0.14);
+
+  --border-subtle: rgba(242, 235, 221, 0.08);
+  --border-medium: rgba(242, 235, 221, 0.16);
+  --border-crimson: rgba(227, 19, 27, 0.45);
+
+  --font-serif: 'Cormorant Garamond', 'Federant', 'Playfair Display', Georgia, serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --transition-smooth: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-main);
+  color: var(--text-ivory);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* Custom sleek scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080808;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #222222;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-crimson);
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-crimson);
+  color: #ffffff;
+}
+
+/* Typography elements */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-serif);
+  color: var(--text-ivory);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-top: 0;
+}
+
+p {
+  color: var(--text-muted);
+}
+
+a {
+  color: var(--text-ivory);
+  text-decoration: none;
+  transition: var(--transition-smooth);
+}
+
+a:hover {
+  color: var(--accent-crimson);
+}
+
+button {
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+input, textarea, select {
+  font-family: var(--font-sans);
 }

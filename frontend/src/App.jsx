@@ -12,6 +12,7 @@ import {
 } from "./services/documentService";
 import Auth from "./Auth";
 import PatientIntake from "./PatientIntake";
+import { LycorisMark } from "./components/LycorisMark";
 import "./App.css";
 
 function App() {
@@ -268,29 +269,35 @@ function App() {
         }
     };
     if (!currentUser) {
-    return <Auth onLogin={handleLogin} />;
-}
+        return <Auth onLogin={handleLogin} />;
+    }
 
     return (
-        <div className="app">
-            {/* Navigation bar */}
-            <header className="navbar">
-            <h1>HealthSummarizer</h1>
-            <span>Manage your health records</span>
+        <div className="app lycoris-app-shell">
+            {/* Top Navigation Bar */}
+            <header className="navbar lycoris-navbar">
+                <div className="navbar-brand">
+                    <LycorisMark size={32} />
+                    <div>
+                        <h1>HealthSummarizer</h1>
+                        <span className="navbar-subtitle">Clinical Archive & Intelligence</span>
+                    </div>
+                </div>
 
-            <div>
-                <span>
-                    {currentUser.name || currentUser.email}
-                </span>
+                <div className="navbar-user">
+                    <span className="user-indicator">
+                        <span className="user-dot" />
+                        {currentUser.name || currentUser.email}
+                    </span>
 
-                <button onClick={handleLogout}>
-                    Logout
-                </button>
-            </div>
+                    <button className="logout-button" onClick={handleLogout}>
+                        Sign Out
+                    </button>
+                </div>
             </header>
 
-            {/* Navigation tabs */}
-            <nav className="main-navigation">
+            {/* Navigation Tabs */}
+            <nav className="main-navigation lycoris-navigation">
                 <button
                     className={
                         activePage === "documents"
@@ -299,6 +306,7 @@ function App() {
                     }
                     onClick={() => setActivePage("documents")}
                 >
+                    <span className="nav-tab-icon">✦</span>
                     Health Documents
                 </button>
 
@@ -310,22 +318,22 @@ function App() {
                     }
                     onClick={() => setActivePage("intake")}
                 >
+                    <span className="nav-tab-icon">◈</span>
                     Patient Intake Assistant
                 </button>
             </nav>
 
-            <main className="container">
+            <main className="container lycoris-container">
                 {activePage === "intake" ? (
                     <PatientIntake />
                 ) : (
                     <>
-                        {/* Page heading */}
-                        <div className="page-header">
+                        {/* Page Header */}
+                        <div className="page-header lycoris-page-header">
                             <div>
-                                <h2>My Health Documents</h2>
+                                <h2>Clinical Documents Archive</h2>
                                 <p>
-                                    Store and manage your health documents
-                                    in one place.
+                                    Archive, inspect, and analyze laboratory investigations, imaging, and clinical narratives.
                                 </p>
                             </div>
 
@@ -333,81 +341,95 @@ function App() {
                                 className="add-button"
                                 onClick={handleAdd}
                             >
-                                + Add Document
+                                + Add Manual Document
                             </button>
                         </div>
 
                         {/* Success and error messages */}
                         {message && (
-                            <p className="message" role="status">
-                                {message}
-                            </p>
+                            <div className="message-banner" role="status">
+                                <span className="msg-icon">!</span>
+                                <span>{message}</span>
+                            </div>
                         )}
 
                         {/* PDF and TXT upload form */}
                         <form
-                            className="document-form"
+                            className="document-form lycoris-card"
                             onSubmit={handleUpload}
                         >
-                            <h3>Upload Health Document</h3>
+                            <div className="card-section-header">
+                                <div>
+                                    <h3>Upload Diagnostic Record</h3>
+                                    <p>
+                                        Extract and archive clinical text directly from PDF reports or TXT files.
+                                    </p>
+                                </div>
+                                <span className="file-format-badge">PDF / TXT</span>
+                            </div>
 
-                            <p>
-                                Upload a PDF or TXT file to save its
-                                extracted text.
-                            </p>
+                            <div className="form-grid">
+                                <div className="form-field">
+                                    <label htmlFor="uploadTitle">
+                                        Document Title <span className="req">*</span>
+                                    </label>
+                                    <input
+                                        id="uploadTitle"
+                                        type="text"
+                                        value={uploadTitle}
+                                        onChange={(event) =>
+                                            setUploadTitle(event.target.value)
+                                        }
+                                        placeholder="e.g. Comprehensive Metabolic Panel (CMP)"
+                                        required
+                                    />
+                                </div>
 
-                            <label htmlFor="uploadTitle">
-                                Document Title
-                            </label>
+                                <div className="form-field">
+                                    <label htmlFor="uploadType">
+                                        Document Category
+                                    </label>
+                                    <select
+                                        id="uploadType"
+                                        value={uploadType}
+                                        onChange={(event) =>
+                                            setUploadType(event.target.value)
+                                        }
+                                    >
+                                        <option>Blood Report</option>
+                                        <option>Prescription</option>
+                                        <option>Diagnostic Report</option>
+                                        <option>Medical History</option>
+                                        <option>Other</option>
+                                    </select>
+                                </div>
+                            </div>
 
-                            <input
-                                id="uploadTitle"
-                                type="text"
-                                value={uploadTitle}
-                                onChange={(event) =>
-                                    setUploadTitle(event.target.value)
-                                }
-                                placeholder="e.g. Thyroid Test Report"
-                                required
-                            />
-
-                            <label htmlFor="uploadType">
-                                Document Type
-                            </label>
-
-                            <select
-                                id="uploadType"
-                                value={uploadType}
-                                onChange={(event) =>
-                                    setUploadType(event.target.value)
-                                }
-                            >
-                                <option>Blood Report</option>
-                                <option>Prescription</option>
-                                <option>Diagnostic Report</option>
-                                <option>Medical History</option>
-                                <option>Other</option>
-                            </select>
-
-                            <label htmlFor="uploadFile">
-                                Choose PDF or TXT File
-                            </label>
-
-                            <input
-                                id="uploadFile"
-                                type="file"
-                                accept=".pdf,.txt"
-                                onChange={(event) =>
-                                    setSelectedFile(
-                                        event.target.files?.[0] || null
-                                    )
-                                }
-                                required
-                            />
-
-                            {selectedFile && (
-                                <p>Selected file: {selectedFile.name}</p>
-                            )}
+                            <div className="form-field file-picker-field">
+                                <label htmlFor="uploadFile">
+                                    Select Report File <span className="req">*</span>
+                                </label>
+                                <div className="file-input-wrapper">
+                                    <input
+                                        id="uploadFile"
+                                        type="file"
+                                        accept=".pdf,.txt"
+                                        onChange={(event) =>
+                                            setSelectedFile(
+                                                event.target.files?.[0] || null
+                                            )
+                                        }
+                                        required
+                                    />
+                                </div>
+                                {selectedFile && (
+                                    <div className="file-selected-badge">
+                                        <span>✓ Ready for ingestion:</span>
+                                        <strong>{selectedFile.name}</strong>
+                                        <span>({(selectedFile.size / 1024).toFixed(1)} KB)</span>
+                                    </div>
+                                )}
+                            </div>
 
                             <div className="form-actions">
                                 <button
@@ -416,8 +438,8 @@ function App() {
                                     disabled={saving}
                                 >
                                     {saving
-                                        ? "Uploading..."
-                                        : "Upload Document"}
+                                        ? "Ingesting Document..."
+                                        : "Upload & Ingest Document →"}
                                 </button>
                             </div>
                         </form>
@@ -425,62 +447,72 @@ function App() {
                         {/* Add and edit form */}
                         {showForm && (
                             <form
-                                className="document-form"
+                                className="document-form lycoris-card"
                                 onSubmit={handleSubmit}
                             >
-                                <h3>
-                                    {editingId !== null
-                                        ? "Edit Health Document"
-                                        : "Add a Health Document"}
-                                </h3>
+                                <div className="card-section-header">
+                                    <div>
+                                        <h3>
+                                            {editingId !== null
+                                                ? "Edit Clinical Record"
+                                                : "Create Manual Clinical Entry"}
+                                        </h3>
+                                        <p>Document observations, symptoms, or clinical consultation summaries.</p>
+                                    </div>
+                                </div>
 
-                                <label htmlFor="title">
-                                    Document Title
-                                </label>
+                                <div className="form-grid">
+                                    <div className="form-field">
+                                        <label htmlFor="title">
+                                            Document Title <span className="req">*</span>
+                                        </label>
+                                        <input
+                                            id="title"
+                                            type="text"
+                                            value={title}
+                                            onChange={(event) =>
+                                                setTitle(event.target.value)
+                                            }
+                                            placeholder="e.g. Endocrine Consultation Note"
+                                            required
+                                        />
+                                    </div>
 
-                                <input
-                                    id="title"
-                                    type="text"
-                                    value={title}
-                                    onChange={(event) =>
-                                        setTitle(event.target.value)
-                                    }
-                                    placeholder="e.g. Blood Test Report"
-                                    required
-                                />
+                                    <div className="form-field">
+                                        <label htmlFor="documentType">
+                                            Document Category
+                                        </label>
+                                        <select
+                                            id="documentType"
+                                            value={documentType}
+                                            onChange={(event) =>
+                                                setDocumentType(event.target.value)
+                                            }
+                                        >
+                                            <option>Blood Report</option>
+                                            <option>Prescription</option>
+                                            <option>Diagnostic Report</option>
+                                            <option>Medical History</option>
+                                            <option>Other</option>
+                                        </select>
+                                    </div>
+                                </div>
 
-                                <label htmlFor="documentType">
-                                    Document Type
-                                </label>
-
-                                <select
-                                    id="documentType"
-                                    value={documentType}
-                                    onChange={(event) =>
-                                        setDocumentType(event.target.value)
-                                    }
-                                >
-                                    <option>Blood Report</option>
-                                    <option>Prescription</option>
-                                    <option>Diagnostic Report</option>
-                                    <option>Medical History</option>
-                                    <option>Other</option>
-                                </select>
-
-                                <label htmlFor="content">
-                                    Document Content
-                                </label>
-
-                                <textarea
-                                    id="content"
-                                    value={content}
-                                    onChange={(event) =>
-                                        setContent(event.target.value)
-                                    }
-                                    placeholder="Enter the health document text..."
-                                    rows="7"
-                                    required
-                                />
+                                <div className="form-field">
+                                    <label htmlFor="content">
+                                        Clinical Observations & Content <span className="req">*</span>
+                                    </label>
+                                    <textarea
+                                        id="content"
+                                        value={content}
+                                        onChange={(event) =>
+                                            setContent(event.target.value)
+                                        }
+                                        placeholder="Enter clinical observations, laboratory findings, or medical instructions..."
+                                        rows={8}
+                                        required
+                                    />
+                                </div>
 
                                 <div className="form-actions">
                                     <button
@@ -489,10 +521,10 @@ function App() {
                                         disabled={saving}
                                     >
                                         {saving
-                                            ? "Saving..."
+                                            ? "Saving Record..."
                                             : editingId !== null
                                                 ? "Update Document"
-                                                : "Save Document"}
+                                                : "Save to Vault"}
                                     </button>
 
                                     <button
@@ -507,51 +539,61 @@ function App() {
                             </form>
                         )}
 
-                        {/* Document list */}
+                        {/* Document list section */}
+                        <div className="documents-section-header">
+                            <h3>Archived Records ({documents.length})</h3>
+                            <span className="section-note">End-to-end encrypted clinical storage</span>
+                        </div>
+
                         {loading ? (
-                            <p>Loading documents...</p>
+                            <div className="empty-state">
+                                <h3>Accessing Vault...</h3>
+                                <p>Loading your clinical documents securely.</p>
+                            </div>
                         ) : documents.length === 0 ? (
                             <div className="empty-state">
-                                <h3>No documents found</h3>
+                                <h3>No Clinical Documents Found</h3>
                                 <p>
-                                    Add or upload your first health document
-                                    to get started.
+                                    Upload a lab report or create a manual entry above to begin building your clinical archive.
                                 </p>
                             </div>
                         ) : (
                             <div className="document-list">
                                 {documents.map((document) => (
                                     <div
-                                        className="document-card"
+                                        className="document-card lycoris-doc-card"
                                         key={document.id}
                                     >
+                                        <div className="document-card-top">
+                                            <span className="document-type-badge">
+                                                {document.documentType || "Clinical Record"}
+                                            </span>
+                                            <span className="document-id-chip">#{document.id}</span>
+                                        </div>
+
                                         <div className="document-details">
                                             <h3>{document.title}</h3>
 
-                                            <span className="document-type">
-                                                {document.documentType}
-                                            </span>
-
-                                            <p>
+                                            <p className="document-snippet">
                                                 {(document.content || "")
-                                                    .substring(0, 150)}
-                                                {(document.content || "").length > 150
+                                                    .substring(0, 160)}
+                                                {(document.content || "").length > 160
                                                     ? "..."
                                                     : ""}
                                             </p>
 
-                                            <small>
-                                                ID: {document.id}
+                                            <div className="document-meta">
                                                 {document.createdAt
-                                                    ? ` • Created: ${new Date(
+                                                    ? `Archived: ${new Date(
                                                         document.createdAt
                                                     ).toLocaleDateString()}`
-                                                    : ""}
-                                            </small>
+                                                    : "Archive timestamp recorded"}
+                                            </div>
                                         </div>
 
                                         <div className="card-actions">
                                             <button
+                                                className="btn-card-action"
                                                 onClick={() =>
                                                     handleView(document.id)
                                                 }
@@ -560,6 +602,7 @@ function App() {
                                             </button>
 
                                             <button
+                                                className="btn-card-action"
                                                 onClick={() =>
                                                     handleEdit(document.id)
                                                 }
@@ -568,7 +611,7 @@ function App() {
                                             </button>
 
                                             <button
-                                                className="delete-button"
+                                                className="btn-card-action delete-button"
                                                 onClick={() =>
                                                     handleDelete(document.id)
                                                 }
@@ -577,14 +620,15 @@ function App() {
                                             </button>
 
                                             <button
+                                                className="btn-card-summarize"
                                                 onClick={() =>
                                                     handleSummarize(document.id)
                                                 }
                                                 disabled={summarizingId !== null}
                                             >
                                                 {summarizingId === document.id
-                                                    ? "Generating..."
-                                                    : "Generate Summary"}
+                                                    ? "Synthesizing..."
+                                                    : "AI Summary ✦"}
                                             </button>
                                         </div>
                                     </div>
@@ -608,12 +652,11 @@ function App() {
                                     }
                                 >
                                     <h2 id="summary-title">
-                                        AI Health Summary
+                                        AI Clinical Synthesis
                                     </h2>
 
                                     <p>
-                                        Generated by Ollama from your saved
-                                        document.
+                                        Synthesized by clinical intelligence models from your archived document.
                                     </p>
 
                                     <div className="full-content">
@@ -625,14 +668,12 @@ function App() {
                                             className="secondary-button"
                                             onClick={() => setSummary("")}
                                         >
-                                            Close
+                                            Close Synthesis
                                         </button>
                                     </div>
 
                                     <small>
-                                        For informational purposes only.
-                                        Consult a qualified healthcare
-                                        professional for medical interpretation.
+                                        For informational purposes only. Consult a qualified healthcare professional for medical diagnosis and interpretation.
                                     </small>
                                 </section>
                             </div>
@@ -658,25 +699,23 @@ function App() {
                                     </h2>
 
                                     <p>
-                                        <strong>Document ID:</strong>{" "}
-                                        {viewingDocument.id}
+                                        <strong>Document Identifier:</strong> #{viewingDocument.id}
                                     </p>
 
                                     <p>
-                                        <strong>Type:</strong>{" "}
-                                        {viewingDocument.documentType}
+                                        <strong>Category:</strong> {viewingDocument.documentType}
                                     </p>
 
                                     <p>
-                                        <strong>Created:</strong>{" "}
+                                        <strong>Archived At:</strong>{" "}
                                         {viewingDocument.createdAt
                                             ? new Date(
                                                 viewingDocument.createdAt
                                             ).toLocaleString()
-                                            : "Not available"}
+                                            : "Recorded"}
                                     </p>
 
-                                    <h3>Full Document Content</h3>
+                                    <h3>Archived Content</h3>
 
                                     <div className="full-content">
                                         {viewingDocument.content}
