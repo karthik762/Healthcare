@@ -2,7 +2,7 @@
 import axios from "axios";
 
 const api = axios.create({
-    baseURL: "http://localhost:8080/api"
+    baseURL: "https://healthcare-hr1n.onrender.com/api"
 });
 
 // Automatically attach the login token to each API request
