@@ -154,4 +154,12 @@ class AiSummaryServiceTest {
         assertTrue(summary.contains("Medications"));
         assertTrue(summary.contains("Important Test Results"));
     }
+
+    @Test
+    void summarizeFallsBackToOfflinePreviewWhenOllamaOffline() {
+        String summary = aiSummaryService.summarize("Hemoglobin: 14.5 g/dL. Blood Sugar: 95 mg/dL.");
+        assertNotNull(summary);
+        assertTrue(summary.contains("DOCUMENT SUMMARY (OFFLINE PREVIEW)"));
+        assertTrue(summary.contains("Hemoglobin: 14.5"));
+    }
 }

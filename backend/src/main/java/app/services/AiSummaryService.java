@@ -72,17 +72,34 @@ public class AiSummaryService {
         request.put("prompt", prompt);
         request.put("stream", false);
 
-        Map<?, ?> response = restClient.post()
-                .uri("/api/generate")
-                .body(request)
-                .retrieve()
-                .body(Map.class);
+        try {
+            Map<?, ?> response = restClient.post()
+                    .uri("/api/generate")
+                    .body(request)
+                    .retrieve()
+                    .body(Map.class);
 
-        if (response == null || response.get("response") == null) {
-            throw new IllegalStateException("Ollama returned an empty response.");
+            if (response != null && response.get("response") != null) {
+                return response.get("response").toString().trim();
+            }
+        } catch (Exception e) {
+            return generateFallbackSingleDocumentSummary(documentText);
         }
 
-        return response.get("response").toString().trim();
+        return generateFallbackSingleDocumentSummary(documentText);
+    }
+
+    private String generateFallbackSingleDocumentSummary(String text) {
+        String excerpt = text.trim();
+        if (excerpt.length() > 300) {
+            excerpt = excerpt.substring(0, 300) + "...";
+        }
+
+        return "DOCUMENT SUMMARY (OFFLINE PREVIEW)\n\n"
+                + "Recorded Content:\n"
+                + excerpt + "\n\n"
+                + "(Note: Ollama is currently offline; displaying stored document preview directly from your records).\n\n"
+                + "Notice: This summary is for reference and does not replace professional medical advice.";
     }
 
     // Consolidated summary across all documents belonging to the user

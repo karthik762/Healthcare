@@ -192,10 +192,16 @@ public class HealthDocumentController {
                     documentResponse(savedDocument));
 
         } catch (IOException exception) {
-
             return ResponseEntity.badRequest()
-                    .body("Could not read the file. "
-                            + "Please check that it is a valid TXT or PDF.");
+                    .body("Could not read the uploaded file. Please verify it is a valid TXT or PDF.");
+        } catch (IllegalArgumentException exception) {
+            return ResponseEntity.badRequest()
+                    .body(exception.getMessage() != null ? exception.getMessage() : "Invalid document input.");
+        } catch (Exception exception) {
+            org.slf4j.LoggerFactory.getLogger(HealthDocumentController.class)
+                    .error("Unexpected error saving uploaded health document", exception);
+            return ResponseEntity.internalServerError()
+                    .body("An error occurred while saving the document. Please try again.");
         }
     }
 

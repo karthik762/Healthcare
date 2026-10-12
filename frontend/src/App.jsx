@@ -224,12 +224,20 @@ function App() {
 
             await loadDocuments();
         } catch (error) {
-            const errorMessage = error.response?.data;
-            setMessage(
-                typeof errorMessage === "string"
-                    ? errorMessage
-                    : "Upload failed. Please check the backend."
-            );
+            const data = error.response?.data;
+            let displayError = "Upload failed. Please check the backend.";
+
+            if (typeof data === "string" && data.trim()) {
+                displayError = data;
+            } else if (data?.message) {
+                displayError = data.message;
+            } else if (data?.error) {
+                displayError = data.error;
+            } else if (error.message) {
+                displayError = error.message;
+            }
+
+            setMessage(displayError);
         } finally {
             setSaving(false);
         }
