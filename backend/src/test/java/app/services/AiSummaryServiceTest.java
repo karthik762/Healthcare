@@ -162,4 +162,109 @@ class AiSummaryServiceTest {
         assertTrue(summary.contains("DOCUMENT SUMMARY (OFFLINE PREVIEW)"));
         assertTrue(summary.contains("Hemoglobin: 14.5"));
     }
+
+    @Test
+    void answerQuestionWithRagFallbackDoesNotDumpRawDocument() {
+        HealthDocument bloodDoc = new HealthDocument();
+        bloodDoc.setId(5L);
+        bloodDoc.setTitle("Comprehensive Metabolic Panel");
+        bloodDoc.setDocumentType("Blood Report");
+        bloodDoc.setContent("""
+                Patient: John Doe. Date: 2026-03-15.
+                Sodium: 140 mEq/L (135-145).
+                Potassium: 4.2 mEq/L (3.5-5.0).
+                Chloride: 102 mEq/L (96-106).
+                Carbon Dioxide: 24 mEq/L (22-29).
+                Blood Urea Nitrogen: 15 mg/dL (7-20).
+                Creatinine: 0.9 mg/dL (0.6-1.2).
+                Glucose: 95 mg/dL (70-99).
+                Calcium: 9.4 mg/dL (8.5-10.2).
+                Total Protein: 7.1 g/dL (6.0-8.3).
+                Albumin: 4.5 g/dL (3.5-5.0).
+                Bilirubin: 0.8 mg/dL (0.1-1.2).
+                Alkaline Phosphatase: 70 U/L (44-147).
+                AST: 22 U/L (10-40).
+                ALT: 25 U/L (7-56).
+                Notes: Routine annual wellness screening.
+                """);
+
+        // When asking general summary question while Ollama is offline
+        var response = aiSummaryService.answerQuestionWithRag("Summarize my latest blood test results.", List.of(bloodDoc));
+
+        assertNotNull(response);
+        // The answer should clearly state AI answering is temporarily offline
+        assertTrue(response.answer().contains("temporarily unavailable") || response.answer().contains("offline"));
+        // Crucially, it must NOT dump the full 15-line raw metabolic panel verbatim as an AI answer
+        assertFalse(response.answer().contains("Bilirubin: 0.8 mg/dL (0.1-1.2)."), "Must not dump raw document panel verbatim");
+        assertFalse(response.answer().contains("Alkaline Phosphatase: 70 U/L"), "Must not dump full panel verbatim");
+    }
+
+    @Test
+    void answerQuestionWithRagExtractsMedicationsAccuratelyInFallback() {
+        HealthDocument medDoc = new HealthDocument();
+        medDoc.setId(6L);
+        medDoc.setTitle("Internal Medicine Prescription");
+        medDoc.setDocumentType("Prescription");
+        medDoc.setContent("Rx:\n1. Metformin 500mg oral tablet twice daily with meals.\n2. Lisinopril 10mg once daily in morning.");
+
+        var response = aiSummaryService.answerQuestionWithRag("What medications are mentioned in my documents?", List.of(medDoc));
+
+        assertNotNull(response);
+        assertTrue(response.answer().contains("Metformin 500mg"));
+        assertTrue(response.answer().contains("Lisinopril 10mg"));
+        assertFalse(response.sources().isEmpty());
+    }
+
+    @Test
+    void answerQuestionWithRagMedicationQuestionReturnsNoneWhenNoMeds() {
+        HealthDocument labDoc = new HealthDocument();
+        labDoc.setId(7L);
+        labDoc.setTitle("Complete Blood Count");
+        labDoc.setDocumentType("Blood Report");
+        labDoc.setContent("WBC: 6.2 k/uL. RBC: 4.8 M/uL. Hemoglobin: 14.1 g/dL. Platelets: 230 k/uL.");
+
+        var response = aiSummaryService.answerQuestionWithRag("What medications are mentioned in my documents?", List.of(labDoc));
+
+        assertNotNull(response);
+        // When asking about medications and only blood lab is provided
+        assertTrue(response.answer().toLowerCase().contains("no medications") || response.answer().toLowerCase().contains("do not contain"),
+                "Should state no medications were found rather than returning the CBC report");
+    }
+
+    @Test
+    void answerQuestionWithRagExtractsHemoglobinInFallback() {
+        HealthDocument labDoc = new HealthDocument();
+        labDoc.setId(8L);
+        labDoc.setTitle("Hemogram Report");
+        labDoc.setDocumentType("Blood Report");
+        labDoc.setContent("Hemoglobin: 14.2 g/dL (Reference: 13.5 - 17.5 g/dL).\nHematocrit: 42.0%.\nWBC Count: 7,000 /mcL.");
+
+        var response = aiSummaryService.answerQuestionWithRag("What was my hemoglobin?", List.of(labDoc));
+
+        assertNotNull(response);
+        assertTrue(response.answer().contains("14.2 g/dL"));
+        assertTrue(response.answer().contains("Hemogram Report"));
+    }
+
+    @Test
+    void retrieveRelevantChunksPrioritizesLatestDocumentWhenRequested() {
+        HealthDocument olderReport = new HealthDocument();
+        olderReport.setId(1L);
+        olderReport.setTitle("Blood Test January");
+        olderReport.setDocumentType("Blood Report");
+        olderReport.setContent("Hemoglobin 12.5 g/dL. Fasting Blood Glucose: 110 mg/dL.");
+
+        HealthDocument newerReport = new HealthDocument();
+        newerReport.setId(20L);
+        newerReport.setTitle("Blood Test October");
+        newerReport.setDocumentType("Blood Report");
+        newerReport.setContent("Hemoglobin 14.1 g/dL. Fasting Blood Glucose: 92 mg/dL.");
+
+        var chunks = aiSummaryService.chunkDocuments(List.of(olderReport, newerReport));
+        var retrieved = aiSummaryService.retrieveRelevantChunks("Summarize my latest blood test results.", chunks);
+
+        assertFalse(retrieved.isEmpty());
+        assertEquals("Blood Test October", retrieved.get(0).documentTitle(),
+                "Query asking for 'latest' should prioritize the most recent document (ID 20)");
+    }
 }
