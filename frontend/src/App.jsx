@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 
 import {
@@ -8,7 +7,9 @@ import {
     updateDocument,
     deleteDocument,
     uploadDocument,
-    summarizeDocument
+    summarizeDocument,
+    generateConsolidatedSummary,
+    askRagQuestion
 } from "./services/documentService";
 import Auth from "./Auth";
 import PatientIntake from "./PatientIntake";
@@ -17,20 +18,20 @@ import "./App.css";
 
 function App() {
     const [currentUser, setCurrentUser] = useState(() => {
-    const token = localStorage.getItem("token");
-    const savedUser = localStorage.getItem("user");
+        const token = localStorage.getItem("token");
+        const savedUser = localStorage.getItem("user");
 
-    if (!token || !savedUser) {
-        return null;
-    }
+        if (!token || !savedUser) {
+            return null;
+        }
 
-    try {
-        return JSON.parse(savedUser);
-    } catch {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-        return null;
-    }
+        try {
+            return JSON.parse(savedUser);
+        } catch {
+            localStorage.removeItem("token");
+            localStorage.removeItem("user");
+            return null;
+        }
     });
 
     const handleLogin = (user) => {
@@ -42,12 +43,15 @@ function App() {
         localStorage.removeItem("user");
         setCurrentUser(null);
         setDocuments([]);
+        setConsolidatedSummary("");
+        setQaHistory([]);
     };
 
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [activePage, setActivePage] = useState("documents");
+    const [activePage, setActivePage] = useState("summary"); // default unified page
 
+    // Document forms and modal state
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [viewingDocument, setViewingDocument] = useState(null);
@@ -59,21 +63,42 @@ function App() {
     const [message, setMessage] = useState("");
     const [saving, setSaving] = useState(false);
 
-    const [summary, setSummary] = useState("");
+    // Single document modal summary
+    const [singleSummary, setSingleSummary] = useState("");
     const [summarizingId, setSummarizingId] = useState(null);
 
-    // File upload states
+    // File upload state
     const [uploadTitle, setUploadTitle] = useState("");
     const [uploadType, setUploadType] = useState("Blood Report");
     const [selectedFile, setSelectedFile] = useState(null);
+
+    // Consolidated Summary state
+    const [consolidatedSummary, setConsolidatedSummary] = useState("");
+    const [summaryGeneratedAt, setSummaryGeneratedAt] = useState("");
+    const [consolidatedLoading, setConsolidatedLoading] = useState(false);
+    const [consolidatedError, setConsolidatedError] = useState("");
+
+    // RAG Q&A state
+    const [qaHistory, setQaHistory] = useState([]);
+    const [questionInput, setQuestionInput] = useState("");
+    const [qaLoading, setQaLoading] = useState(false);
+    const [qaError, setQaError] = useState("");
+
+    const suggestedQuestions = [
+        "What medications are mentioned in my documents?",
+        "Summarize my latest blood test results.",
+        "What symptoms have been recorded?",
+        "Which medical conditions are mentioned across my reports?",
+        "Are there any follow-up instructions in my documents?"
+    ];
 
     // Load all documents
     const loadDocuments = async () => {
         try {
             const response = await getDocuments();
             setDocuments(response.data);
-        } catch (error) {
-            setMessage("Could not load documents. Check the backend.");
+        } catch {
+            setMessage("Could not load documents. Check the backend connection.");
         } finally {
             setLoading(false);
         }
@@ -85,7 +110,7 @@ function App() {
         }
     }, [currentUser]);
 
-    // Clear the manual document form
+    // Clear document form
     const resetForm = () => {
         setTitle("");
         setDocumentType("Blood Report");
@@ -94,29 +119,27 @@ function App() {
         setShowForm(false);
     };
 
-    // Open the form for a new document
+    // Open form for a new document
     const handleAdd = () => {
         resetForm();
         setMessage("");
         setShowForm(true);
     };
 
-    // View a complete document
+    // View complete document content
     const handleView = async (id) => {
         setMessage("");
-
         try {
             const response = await getDocument(id);
             setViewingDocument(response.data);
-        } catch (error) {
+        } catch {
             setMessage("Could not load this document.");
         }
     };
 
-    // Load existing values into the edit form
+    // Edit existing document
     const handleEdit = async (id) => {
         setMessage("");
-
         try {
             const response = await getDocument(id);
             const document = response.data;
@@ -127,12 +150,12 @@ function App() {
             setEditingId(document.id);
             setShowForm(true);
             setViewingDocument(null);
-        } catch (error) {
+        } catch {
             setMessage("Could not load the document for editing.");
         }
     };
 
-    // Add a new document or update an existing document
+    // Save or update manual document
     const handleSubmit = async (event) => {
         event.preventDefault();
         setMessage("");
@@ -161,7 +184,7 @@ function App() {
 
             resetForm();
             await loadDocuments();
-        } catch (error) {
+        } catch {
             setMessage(
                 editingId !== null
                     ? "Could not update the document."
@@ -172,7 +195,7 @@ function App() {
         }
     };
 
-    // Upload a PDF or TXT document
+    // Upload PDF or TXT document
     const handleUpload = async (event) => {
         event.preventDefault();
         setMessage("");
@@ -183,7 +206,6 @@ function App() {
         }
 
         const fileName = selectedFile.name.toLowerCase();
-
         if (!fileName.endsWith(".pdf") && !fileName.endsWith(".txt")) {
             setMessage("Only PDF and TXT files are supported.");
             return;
@@ -192,24 +214,17 @@ function App() {
         setSaving(true);
 
         try {
-            await uploadDocument(
-                uploadTitle.trim(),
-                uploadType,
-                selectedFile
-            );
-
+            await uploadDocument(uploadTitle.trim(), uploadType, selectedFile);
             setMessage("Document uploaded successfully!");
 
             setUploadTitle("");
             setUploadType("Blood Report");
             setSelectedFile(null);
-
             event.currentTarget.reset();
 
             await loadDocuments();
         } catch (error) {
             const errorMessage = error.response?.data;
-
             setMessage(
                 typeof errorMessage === "string"
                     ? errorMessage
@@ -220,15 +235,33 @@ function App() {
         }
     };
 
-    // Generate AI summary for a saved document
-    const handleSummarize = async (id) => {
+    // Delete document
+    const handleDelete = async (id) => {
+        const confirmed = window.confirm("Are you sure you want to delete this document?");
+        if (!confirmed) return;
+
         setMessage("");
-        setSummary("");
+        try {
+            await deleteDocument(id);
+            if (viewingDocument?.id === id) setViewingDocument(null);
+            if (editingId === id) resetForm();
+
+            setMessage("Document deleted successfully.");
+            await loadDocuments();
+        } catch {
+            setMessage("Could not delete the document.");
+        }
+    };
+
+    // Generate single document summary modal
+    const handleSummarizeSingle = async (id) => {
+        setMessage("");
+        setSingleSummary("");
         setSummarizingId(id);
 
         try {
             const response = await summarizeDocument(id);
-            setSummary(response.data.summary);
+            setSingleSummary(response.data.summary);
         } catch (error) {
             setMessage(
                 error.response?.data?.error ||
@@ -239,35 +272,70 @@ function App() {
         }
     };
 
-    // Delete a document
-    const handleDelete = async (id) => {
-        const confirmed = window.confirm(
-            "Are you sure you want to delete this document?"
-        );
-
-        if (!confirmed) {
+    // Generate Consolidated AI Summary across ALL user documents
+    const handleGenerateConsolidated = async () => {
+        if (documents.length === 0) {
+            setConsolidatedError("Please upload or add at least one health document first.");
             return;
         }
 
-        setMessage("");
+        setConsolidatedLoading(true);
+        setConsolidatedError("");
 
         try {
-            await deleteDocument(id);
-
-            if (viewingDocument?.id === id) {
-                setViewingDocument(null);
-            }
-
-            if (editingId === id) {
-                resetForm();
-            }
-
-            setMessage("Document deleted successfully.");
-            await loadDocuments();
+            const response = await generateConsolidatedSummary();
+            setConsolidatedSummary(response.data.summary);
+            setSummaryGeneratedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
         } catch (error) {
-            setMessage("Could not delete the document.");
+            setConsolidatedError(
+                error.response?.data?.error ||
+                "Failed to generate consolidated summary. Check that Ollama is running."
+            );
+        } finally {
+            setConsolidatedLoading(false);
         }
     };
+
+    // Ask a question using RAG
+    const handleAskQuestion = async (queryToAsk) => {
+        const query = (queryToAsk || questionInput).trim();
+        if (!query) return;
+
+        if (documents.length === 0) {
+            setQaError("You do not have any saved health documents. Please add documents first.");
+            return;
+        }
+
+        setQaLoading(true);
+        setQaError("");
+
+        try {
+            const response = await askRagQuestion(query);
+            const newEntry = {
+                id: Date.now(),
+                question: query,
+                answer: response.data.answer,
+                sources: response.data.sources || [],
+                timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            };
+
+            setQaHistory((prev) => [newEntry, ...prev]);
+            setQuestionInput("");
+        } catch (error) {
+            setQaError(
+                error.response?.data?.error ||
+                "Could not retrieve answer. Check backend and Ollama connectivity."
+            );
+        } finally {
+            setQaLoading(false);
+        }
+    };
+
+    const handleFormAsk = (e) => {
+        e.preventDefault();
+        handleAskQuestion();
+    };
+
     if (!currentUser) {
         return <Auth onLogin={handleLogin} />;
     }
@@ -280,7 +348,7 @@ function App() {
                     <LycorisMark size={32} />
                     <div>
                         <h1>HealthSummarizer</h1>
-                        <span className="navbar-subtitle">Clinical Archive & Intelligence</span>
+                        <span className="navbar-subtitle">Unified Health Summary & RAG Q&A</span>
                     </div>
                 </div>
 
@@ -299,23 +367,15 @@ function App() {
             {/* Navigation Tabs */}
             <nav className="main-navigation lycoris-navigation">
                 <button
-                    className={
-                        activePage === "documents"
-                            ? "nav-button active"
-                            : "nav-button"
-                    }
-                    onClick={() => setActivePage("documents")}
+                    className={activePage === "summary" ? "nav-button active" : "nav-button"}
+                    onClick={() => setActivePage("summary")}
                 >
                     <span className="nav-tab-icon">✦</span>
-                    Health Documents
+                    Generate Summary
                 </button>
 
                 <button
-                    className={
-                        activePage === "intake"
-                            ? "nav-button active"
-                            : "nav-button"
-                    }
+                    className={activePage === "intake" ? "nav-button active" : "nav-button"}
                     onClick={() => setActivePage("intake")}
                 >
                     <span className="nav-tab-icon">◈</span>
@@ -327,25 +387,38 @@ function App() {
                 {activePage === "intake" ? (
                     <PatientIntake />
                 ) : (
-                    <>
-                        {/* Page Header */}
+                    <div className="unified-health-page">
+                        {/* =========================================================
+                            SECTION A: Unified Page Header
+                            ========================================================= */}
                         <div className="page-header lycoris-page-header">
                             <div>
-                                <h2>Clinical Documents Archive</h2>
-                                <p>
-                                    Archive, inspect, and analyze laboratory investigations, imaging, and clinical narratives.
+                                <h2>My Health Summary</h2>
+                                <p className="page-header-subtitle">
+                                    Your health documents, summarized in one place.
                                 </p>
                             </div>
 
-                            <button
-                                className="add-button"
-                                onClick={handleAdd}
-                            >
-                                + Add Manual Document
-                            </button>
+                            <div className="header-actions-group">
+                                <span className="doc-count-badge">
+                                    {documents.length} {documents.length === 1 ? "Document" : "Documents"} Available
+                                </span>
+
+                                <button
+                                    className="primary-accent-btn"
+                                    onClick={handleGenerateConsolidated}
+                                    disabled={consolidatedLoading || documents.length === 0}
+                                >
+                                    {consolidatedLoading
+                                        ? "Synthesizing Summary..."
+                                        : consolidatedSummary
+                                            ? "Regenerate Summary ✦"
+                                            : "Generate Summary ✦"}
+                                </button>
+                            </div>
                         </div>
 
-                        {/* Success and error messages */}
+                        {/* Status notification banner */}
                         {message && (
                             <div className="message-banner" role="status">
                                 <span className="msg-icon">!</span>
@@ -353,389 +426,521 @@ function App() {
                             </div>
                         )}
 
-                        {/* PDF and TXT upload form */}
-                        <form
-                            className="document-form lycoris-card"
-                            onSubmit={handleUpload}
-                        >
-                            <div className="card-section-header">
+                        {/* =========================================================
+                            SECTION B: My Health Documents
+                            ========================================================= */}
+                        <section className="unified-section documents-management-section">
+                            <div className="section-title-bar">
                                 <div>
-                                    <h3>Upload Diagnostic Record</h3>
-                                    <p>
-                                        Extract and archive clinical text directly from PDF reports or TXT files.
+                                    <h3 className="section-title">My Health Documents</h3>
+                                    <p className="section-desc">
+                                        Upload clinical reports or create manual records to ground your AI summary and Q&A.
                                     </p>
                                 </div>
-                                <span className="file-format-badge">PDF / TXT</span>
-                            </div>
 
-                            <div className="form-grid">
-                                <div className="form-field">
-                                    <label htmlFor="uploadTitle">
-                                        Document Title <span className="req">*</span>
-                                    </label>
-                                    <input
-                                        id="uploadTitle"
-                                        type="text"
-                                        value={uploadTitle}
-                                        onChange={(event) =>
-                                            setUploadTitle(event.target.value)
-                                        }
-                                        placeholder="e.g. Comprehensive Metabolic Panel (CMP)"
-                                        required
-                                    />
-                                </div>
-
-                                <div className="form-field">
-                                    <label htmlFor="uploadType">
-                                        Document Category
-                                    </label>
-                                    <select
-                                        id="uploadType"
-                                        value={uploadType}
-                                        onChange={(event) =>
-                                            setUploadType(event.target.value)
-                                        }
-                                    >
-                                        <option>Blood Report</option>
-                                        <option>Prescription</option>
-                                        <option>Diagnostic Report</option>
-                                        <option>Medical History</option>
-                                        <option>Other</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div className="form-field file-picker-field">
-                                <label htmlFor="uploadFile">
-                                    Select Report File <span className="req">*</span>
-                                </label>
-                                <div className="file-input-wrapper">
-                                    <input
-                                        id="uploadFile"
-                                        type="file"
-                                        accept=".pdf,.txt"
-                                        onChange={(event) =>
-                                            setSelectedFile(
-                                                event.target.files?.[0] || null
-                                            )
-                                        }
-                                        required
-                                    />
-                                </div>
-                                {selectedFile && (
-                                    <div className="file-selected-badge">
-                                        <span>✓ Ready for ingestion:</span>
-                                        <strong>{selectedFile.name}</strong>
-                                        <span>({(selectedFile.size / 1024).toFixed(1)} KB)</span>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="form-actions">
                                 <button
                                     className="add-button"
-                                    type="submit"
-                                    disabled={saving}
+                                    onClick={() => setShowForm(!showForm)}
                                 >
-                                    {saving
-                                        ? "Ingesting Document..."
-                                        : "Upload & Ingest Document →"}
+                                    {showForm ? "Close Document Form" : "+ Add Document"}
                                 </button>
                             </div>
-                        </form>
 
-                        {/* Add and edit form */}
-                        {showForm && (
-                            <form
-                                className="document-form lycoris-card"
-                                onSubmit={handleSubmit}
-                            >
-                                <div className="card-section-header">
-                                    <div>
-                                        <h3>
-                                            {editingId !== null
-                                                ? "Edit Clinical Record"
-                                                : "Create Manual Clinical Entry"}
-                                        </h3>
-                                        <p>Document observations, symptoms, or clinical consultation summaries.</p>
-                                    </div>
-                                </div>
-
-                                <div className="form-grid">
-                                    <div className="form-field">
-                                        <label htmlFor="title">
-                                            Document Title <span className="req">*</span>
-                                        </label>
-                                        <input
-                                            id="title"
-                                            type="text"
-                                            value={title}
-                                            onChange={(event) =>
-                                                setTitle(event.target.value)
-                                            }
-                                            placeholder="e.g. Endocrine Consultation Note"
-                                            required
-                                        />
-                                    </div>
-
-                                    <div className="form-field">
-                                        <label htmlFor="documentType">
-                                            Document Category
-                                        </label>
-                                        <select
-                                            id="documentType"
-                                            value={documentType}
-                                            onChange={(event) =>
-                                                setDocumentType(event.target.value)
-                                            }
-                                        >
-                                            <option>Blood Report</option>
-                                            <option>Prescription</option>
-                                            <option>Diagnostic Report</option>
-                                            <option>Medical History</option>
-                                            <option>Other</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className="form-field">
-                                    <label htmlFor="content">
-                                        Clinical Observations & Content <span className="req">*</span>
-                                    </label>
-                                    <textarea
-                                        id="content"
-                                        value={content}
-                                        onChange={(event) =>
-                                            setContent(event.target.value)
-                                        }
-                                        placeholder="Enter clinical observations, laboratory findings, or medical instructions..."
-                                        rows={8}
-                                        required
-                                    />
-                                </div>
-
-                                <div className="form-actions">
-                                    <button
-                                        className="add-button"
-                                        type="submit"
-                                        disabled={saving}
+                            {/* Collapsible Document Ingestion & Creation Form */}
+                            {showForm && (
+                                <div className="forms-wrapper">
+                                    {/* Upload Form */}
+                                    <form
+                                        className="document-form lycoris-card"
+                                        onSubmit={handleUpload}
                                     >
-                                        {saving
-                                            ? "Saving Record..."
-                                            : editingId !== null
-                                                ? "Update Document"
-                                                : "Save to Vault"}
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        className="secondary-button"
-                                        onClick={resetForm}
-                                        disabled={saving}
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
-                            </form>
-                        )}
-
-                        {/* Document list section */}
-                        <div className="documents-section-header">
-                            <h3>Archived Records ({documents.length})</h3>
-                            <span className="section-note">End-to-end encrypted clinical storage</span>
-                        </div>
-
-                        {loading ? (
-                            <div className="empty-state">
-                                <h3>Accessing Vault...</h3>
-                                <p>Loading your clinical documents securely.</p>
-                            </div>
-                        ) : documents.length === 0 ? (
-                            <div className="empty-state">
-                                <h3>No Clinical Documents Found</h3>
-                                <p>
-                                    Upload a lab report or create a manual entry above to begin building your clinical archive.
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="document-list">
-                                {documents.map((document) => (
-                                    <div
-                                        className="document-card lycoris-doc-card"
-                                        key={document.id}
-                                    >
-                                        <div className="document-card-top">
-                                            <span className="document-type-badge">
-                                                {document.documentType || "Clinical Record"}
-                                            </span>
-                                            <span className="document-id-chip">#{document.id}</span>
+                                        <div className="card-section-header">
+                                            <div>
+                                                <h4>Upload Document (PDF / TXT)</h4>
+                                                <p>Extract clinical text directly from laboratory reports or medical records.</p>
+                                            </div>
+                                            <span className="file-format-badge">PDF / TXT</span>
                                         </div>
 
-                                        <div className="document-details">
-                                            <h3>{document.title}</h3>
+                                        <div className="form-grid">
+                                            <div className="form-field">
+                                                <label htmlFor="uploadTitle">
+                                                    Document Title <span className="req">*</span>
+                                                </label>
+                                                <input
+                                                    id="uploadTitle"
+                                                    type="text"
+                                                    value={uploadTitle}
+                                                    onChange={(e) => setUploadTitle(e.target.value)}
+                                                    placeholder="e.g. Complete Blood Count (CBC)"
+                                                    required
+                                                />
+                                            </div>
 
-                                            <p className="document-snippet">
-                                                {(document.content || "")
-                                                    .substring(0, 160)}
-                                                {(document.content || "").length > 160
-                                                    ? "..."
-                                                    : ""}
-                                            </p>
-
-                                            <div className="document-meta">
-                                                {document.createdAt
-                                                    ? `Archived: ${new Date(
-                                                        document.createdAt
-                                                    ).toLocaleDateString()}`
-                                                    : "Archive timestamp recorded"}
+                                            <div className="form-field">
+                                                <label htmlFor="uploadType">Document Category</label>
+                                                <select
+                                                    id="uploadType"
+                                                    value={uploadType}
+                                                    onChange={(e) => setUploadType(e.target.value)}
+                                                >
+                                                    <option>Blood Report</option>
+                                                    <option>Prescription</option>
+                                                    <option>Diagnostic Report</option>
+                                                    <option>Medical History</option>
+                                                    <option>Other</option>
+                                                </select>
                                             </div>
                                         </div>
 
-                                        <div className="card-actions">
-                                            <button
-                                                className="btn-card-action"
-                                                onClick={() =>
-                                                    handleView(document.id)
-                                                }
-                                            >
-                                                View
-                                            </button>
+                                        <div className="form-field file-picker-field">
+                                            <label htmlFor="uploadFile">
+                                                Select File <span className="req">*</span>
+                                            </label>
+                                            <div className="file-input-wrapper">
+                                                <input
+                                                    id="uploadFile"
+                                                    type="file"
+                                                    accept=".pdf,.txt"
+                                                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                                                    required
+                                                />
+                                            </div>
+                                            {selectedFile && (
+                                                <div className="file-selected-badge">
+                                                    <span>Selected:</span>
+                                                    <strong>{selectedFile.name}</strong>
+                                                    <span>({(selectedFile.size / 1024).toFixed(1)} KB)</span>
+                                                </div>
+                                            )}
+                                        </div>
 
+                                        <div className="form-actions">
                                             <button
-                                                className="btn-card-action"
-                                                onClick={() =>
-                                                    handleEdit(document.id)
-                                                }
+                                                className="add-button"
+                                                type="submit"
+                                                disabled={saving}
                                             >
-                                                Edit
-                                            </button>
-
-                                            <button
-                                                className="btn-card-action delete-button"
-                                                onClick={() =>
-                                                    handleDelete(document.id)
-                                                }
-                                            >
-                                                Delete
-                                            </button>
-
-                                            <button
-                                                className="btn-card-summarize"
-                                                onClick={() =>
-                                                    handleSummarize(document.id)
-                                                }
-                                                disabled={summarizingId !== null}
-                                            >
-                                                {summarizingId === document.id
-                                                    ? "Synthesizing..."
-                                                    : "AI Summary ✦"}
+                                                {saving ? "Uploading..." : "Upload Document →"}
                                             </button>
                                         </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                                    </form>
 
-                        {/* AI Summary modal */}
-                        {summary && (
-                            <div
-                                className="modal-overlay"
-                                onClick={() => setSummary("")}
-                            >
+                                    {/* Manual Entry Form */}
+                                    <form
+                                        className="document-form lycoris-card"
+                                        onSubmit={handleSubmit}
+                                    >
+                                        <div className="card-section-header">
+                                            <div>
+                                                <h4>
+                                                    {editingId !== null ? "Edit Document" : "Create Manual Entry"}
+                                                </h4>
+                                                <p>Manually record prescriptions, clinical findings, or doctor consultations.</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="form-grid">
+                                            <div className="form-field">
+                                                <label htmlFor="title">
+                                                    Title <span className="req">*</span>
+                                                </label>
+                                                <input
+                                                    id="title"
+                                                    type="text"
+                                                    value={title}
+                                                    onChange={(e) => setTitle(e.target.value)}
+                                                    placeholder="e.g. Cardiology Follow-up Note"
+                                                    required
+                                                />
+                                            </div>
+
+                                            <div className="form-field">
+                                                <label htmlFor="documentType">Category</label>
+                                                <select
+                                                    id="documentType"
+                                                    value={documentType}
+                                                    onChange={(e) => setDocumentType(e.target.value)}
+                                                >
+                                                    <option>Blood Report</option>
+                                                    <option>Prescription</option>
+                                                    <option>Diagnostic Report</option>
+                                                    <option>Medical History</option>
+                                                    <option>Other</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="form-field">
+                                            <label htmlFor="content">
+                                                Document Content <span className="req">*</span>
+                                            </label>
+                                            <textarea
+                                                id="content"
+                                                value={content}
+                                                onChange={(e) => setContent(e.target.value)}
+                                                placeholder="Enter observations, test results, or prescription details..."
+                                                rows={5}
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="form-actions">
+                                            <button
+                                                className="add-button"
+                                                type="submit"
+                                                disabled={saving}
+                                            >
+                                                {saving
+                                                    ? "Saving..."
+                                                    : editingId !== null
+                                                        ? "Update Document"
+                                                        : "Save Document"}
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                className="secondary-button"
+                                                onClick={resetForm}
+                                                disabled={saving}
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            )}
+
+                            {/* Documents Cards List */}
+                            {loading ? (
+                                <div className="empty-state">
+                                    <h3>Loading Documents...</h3>
+                                    <p>Fetching your health records from database storage.</p>
+                                </div>
+                            ) : documents.length === 0 ? (
+                                <div className="empty-state">
+                                    <h3>No Health Documents Found</h3>
+                                    <p>
+                                        Add your first health document above to unlock the consolidated AI summary and document Q&A.
+                                    </p>
+                                    <button
+                                        className="add-button"
+                                        style={{ marginTop: 16 }}
+                                        onClick={handleAdd}
+                                    >
+                                        + Add Your First Document
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="document-list">
+                                    {documents.map((doc) => (
+                                        <div className="document-card lycoris-doc-card" key={doc.id}>
+                                            <div className="document-card-top">
+                                                <span className="document-type-badge">
+                                                    {doc.documentType || "General"}
+                                                </span>
+                                                <span className="document-id-chip">#{doc.id}</span>
+                                            </div>
+
+                                            <div className="document-details">
+                                                <h3>{doc.title}</h3>
+                                                <p className="document-snippet">
+                                                    {(doc.content || "").substring(0, 150)}
+                                                    {(doc.content || "").length > 150 ? "..." : ""}
+                                                </p>
+                                                <div className="document-meta">
+                                                    {doc.createdAt
+                                                        ? `Added: ${new Date(doc.createdAt).toLocaleDateString()}`
+                                                        : "Date recorded"}
+                                                </div>
+                                            </div>
+
+                                            <div className="card-actions">
+                                                <button
+                                                    className="btn-card-action"
+                                                    onClick={() => handleView(doc.id)}
+                                                >
+                                                    View
+                                                </button>
+                                                <button
+                                                    className="btn-card-action"
+                                                    onClick={() => handleEdit(doc.id)}
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    className="btn-card-action delete-button"
+                                                    onClick={() => handleDelete(doc.id)}
+                                                >
+                                                    Delete
+                                                </button>
+                                                <button
+                                                    className="btn-card-summarize"
+                                                    onClick={() => handleSummarizeSingle(doc.id)}
+                                                    disabled={summarizingId !== null}
+                                                >
+                                                    {summarizingId === doc.id ? "Analyzing..." : "Doc Summary ✦"}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+
+                        {/* =========================================================
+                            SECTION C: Consolidated AI Health Summary
+                            ========================================================= */}
+                        <section className="unified-section consolidated-summary-section">
+                            <div className="section-title-bar">
+                                <div>
+                                    <h3 className="section-title">Consolidated AI Health Summary</h3>
+                                    <p className="section-desc">
+                                        Synthesized from all your available medical records by local Ollama model (llama3.2:3b).
+                                    </p>
+                                </div>
+
+                                {consolidatedSummary && (
+                                    <button
+                                        className="secondary-button"
+                                        onClick={handleGenerateConsolidated}
+                                        disabled={consolidatedLoading}
+                                    >
+                                        {consolidatedLoading ? "Updating..." : "Regenerate ⟳"}
+                                    </button>
+                                )}
+                            </div>
+
+                            {consolidatedError && (
+                                <div className="intake-error" style={{ marginBottom: 16 }}>
+                                    {consolidatedError}
+                                </div>
+                            )}
+
+                            {consolidatedLoading ? (
+                                <div className="summary-loading-card">
+                                    <div className="lycoris-spinner" style={{ width: 28, height: 28 }} />
+                                    <div style={{ marginTop: 14 }}>
+                                        <strong>Generating Consolidated Summary...</strong>
+                                        <p>Analyzing {documents.length} document(s) with Ollama. This takes a few moments.</p>
+                                    </div>
+                                </div>
+                            ) : consolidatedSummary ? (
+                                <div className="consolidated-summary-display lycoris-card">
+                                    <div className="summary-meta-header">
+                                        <span className="summary-badge">
+                                            ✓ Unified Clinical Synthesis Across {documents.length} Records
+                                        </span>
+                                        <span className="summary-date-tag">
+                                            {summaryGeneratedAt ? `Generated at ${summaryGeneratedAt}` : "Clinical Synthesis"}
+                                        </span>
+                                    </div>
+
+                                    <div className="consolidated-content-box">
+                                        {consolidatedSummary}
+                                    </div>
+
+                                    <div className="summary-disclaimer-box">
+                                        <span className="disclaimer-icon">ℹ</span>
+                                        <span>
+                                            <strong>Medical Disclaimer:</strong> This consolidated summary is generated automatically by an AI model for informational reference only. It does not replace professional medical evaluation, diagnosis, or advice from a qualified doctor.
+                                        </span>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="summary-empty-callout lycoris-card">
+                                    <h4>No Consolidated Summary Generated Yet</h4>
+                                    <p>
+                                        Click <strong>Generate Summary</strong> to combine all your {documents.length} saved health documents into one structured clinical overview.
+                                    </p>
+                                    <button
+                                        className="primary-accent-btn"
+                                        onClick={handleGenerateConsolidated}
+                                        disabled={documents.length === 0}
+                                        style={{ marginTop: 12 }}
+                                    >
+                                        Generate Consolidated Summary ✦
+                                    </button>
+                                </div>
+                            )}
+                        </section>
+
+                        {/* =========================================================
+                            SECTION D: Ask Questions About My Documents (RAG Q&A)
+                            ========================================================= */}
+                        <section className="unified-section rag-qa-section">
+                            <div className="section-title-bar">
+                                <div>
+                                    <h3 className="section-title">Ask Questions About My Documents</h3>
+                                    <p className="section-desc">
+                                        Retrieval-Augmented Generation (RAG): answers are strictly grounded in your saved document text.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Suggested Quick Question Chips */}
+                            <div className="rag-suggested-wrapper">
+                                <span className="suggested-label">Suggested Questions:</span>
+                                <div className="rag-chips-row">
+                                    {suggestedQuestions.map((q, idx) => (
+                                        <button
+                                            key={idx}
+                                            type="button"
+                                            className="rag-chip-btn"
+                                            onClick={() => handleAskQuestion(q)}
+                                            disabled={qaLoading || documents.length === 0}
+                                        >
+                                            {q}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Question Input Form */}
+                            <form className="rag-query-form lycoris-card" onSubmit={handleFormAsk}>
+                                <div className="rag-input-group">
+                                    <input
+                                        type="text"
+                                        className="rag-text-input"
+                                        value={questionInput}
+                                        onChange={(e) => setQuestionInput(e.target.value)}
+                                        placeholder="Ask a question about your health documents..."
+                                        disabled={qaLoading}
+                                    />
+                                    <button
+                                        type="submit"
+                                        className="primary-accent-btn"
+                                        disabled={qaLoading || !questionInput.trim() || documents.length === 0}
+                                    >
+                                        {qaLoading ? "Searching..." : "Ask Question →"}
+                                    </button>
+                                </div>
+
+                                {qaError && (
+                                    <div className="intake-error" style={{ marginTop: 12 }}>
+                                        {qaError}
+                                    </div>
+                                )}
+                            </form>
+
+                            {/* Conversation / Q&A History */}
+                            {qaLoading && (
+                                <div className="rag-loading-state">
+                                    <span className="lycoris-spinner" style={{ width: 20, height: 20 }} />
+                                    <span>Retrieving relevant excerpts and generating grounded answer...</span>
+                                </div>
+                            )}
+
+                            {qaHistory.length > 0 && (
+                                <div className="rag-history-list">
+                                    {qaHistory.map((entry) => (
+                                        <div key={entry.id} className="rag-qa-card lycoris-card">
+                                            {/* User Question */}
+                                            <div className="rag-question-row">
+                                                <div className="rag-user-tag">
+                                                    <span className="role-chip">QUESTION</span>
+                                                    <span className="time-tag">{entry.timestamp}</span>
+                                                </div>
+                                                <h4 className="rag-question-text">{entry.question}</h4>
+                                            </div>
+
+                                            {/* Ollama Grounded Answer */}
+                                            <div className="rag-answer-row">
+                                                <div className="rag-ai-tag">
+                                                    <span className="ai-chip">OLLAMA RAG ANSWER</span>
+                                                </div>
+                                                <div className="rag-answer-content">
+                                                    {entry.answer}
+                                                </div>
+                                            </div>
+
+                                            {/* Source Citations */}
+                                            {entry.sources && entry.sources.length > 0 && (
+                                                <div className="rag-sources-box">
+                                                    <span className="sources-heading">
+                                                        Retrieved Document Sources ({entry.sources.length}):
+                                                    </span>
+                                                    <div className="sources-list">
+                                                        {entry.sources.map((src, sIdx) => (
+                                                            <div key={sIdx} className="source-citation-badge">
+                                                                <div className="source-header">
+                                                                    <strong>📄 {src.title}</strong>
+                                                                    <span className="source-type-pill">
+                                                                        {src.documentType}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="source-excerpt">
+                                                                    "{src.excerpt}"
+                                                                </p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+
+                        {/* =========================================================
+                            MODALS
+                            ========================================================= */}
+
+                        {/* Single Document AI Summary Modal */}
+                        {singleSummary && (
+                            <div className="modal-overlay" onClick={() => setSingleSummary("")}>
                                 <section
                                     className="view-modal"
                                     role="dialog"
                                     aria-modal="true"
-                                    aria-labelledby="summary-title"
-                                    onClick={(event) =>
-                                        event.stopPropagation()
-                                    }
+                                    onClick={(e) => e.stopPropagation()}
                                 >
-                                    <h2 id="summary-title">
-                                        AI Clinical Synthesis
-                                    </h2>
-
-                                    <p>
-                                        Synthesized by clinical intelligence models from your archived document.
-                                    </p>
-
-                                    <div className="full-content">
-                                        {summary}
-                                    </div>
-
+                                    <h2>Document Summary</h2>
+                                    <p>Individual document analysis via Ollama (llama3.2:3b).</p>
+                                    <div className="full-content">{singleSummary}</div>
                                     <div className="form-actions">
                                         <button
                                             className="secondary-button"
-                                            onClick={() => setSummary("")}
+                                            onClick={() => setSingleSummary("")}
                                         >
-                                            Close Synthesis
+                                            Close Summary
                                         </button>
                                     </div>
-
-                                    <small>
-                                        For informational purposes only. Consult a qualified healthcare professional for medical diagnosis and interpretation.
-                                    </small>
                                 </section>
                             </div>
                         )}
 
-                        {/* Full document view modal */}
+                        {/* Full Document View Modal */}
                         {viewingDocument && (
-                            <div
-                                className="modal-overlay"
-                                onClick={() => setViewingDocument(null)}
-                            >
+                            <div className="modal-overlay" onClick={() => setViewingDocument(null)}>
                                 <section
                                     className="view-modal"
                                     role="dialog"
                                     aria-modal="true"
-                                    aria-labelledby="view-title"
-                                    onClick={(event) =>
-                                        event.stopPropagation()
-                                    }
+                                    onClick={(e) => e.stopPropagation()}
                                 >
-                                    <h2 id="view-title">
-                                        {viewingDocument.title}
-                                    </h2>
-
+                                    <h2>{viewingDocument.title}</h2>
+                                    <p><strong>Document ID:</strong> #{viewingDocument.id}</p>
+                                    <p><strong>Category:</strong> {viewingDocument.documentType}</p>
                                     <p>
-                                        <strong>Document Identifier:</strong> #{viewingDocument.id}
-                                    </p>
-
-                                    <p>
-                                        <strong>Category:</strong> {viewingDocument.documentType}
-                                    </p>
-
-                                    <p>
-                                        <strong>Archived At:</strong>{" "}
+                                        <strong>Date:</strong>{" "}
                                         {viewingDocument.createdAt
-                                            ? new Date(
-                                                viewingDocument.createdAt
-                                            ).toLocaleString()
+                                            ? new Date(viewingDocument.createdAt).toLocaleString()
                                             : "Recorded"}
                                     </p>
-
-                                    <h3>Archived Content</h3>
-
-                                    <div className="full-content">
-                                        {viewingDocument.content}
-                                    </div>
-
+                                    <h3>Document Content</h3>
+                                    <div className="full-content">{viewingDocument.content}</div>
                                     <div className="form-actions">
                                         <button
                                             className="add-button"
-                                            onClick={() =>
-                                                handleEdit(viewingDocument.id)
-                                            }
+                                            onClick={() => handleEdit(viewingDocument.id)}
                                         >
                                             Edit Document
                                         </button>
-
                                         <button
                                             className="secondary-button"
-                                            onClick={() =>
-                                                setViewingDocument(null)
-                                            }
+                                            onClick={() => setViewingDocument(null)}
                                         >
                                             Close
                                         </button>
@@ -743,7 +948,7 @@ function App() {
                                 </section>
                             </div>
                         )}
-                    </>
+                    </div>
                 )}
             </main>
         </div>

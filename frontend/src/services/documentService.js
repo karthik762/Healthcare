@@ -1,4 +1,3 @@
-
 import api from "../api";
 
 const API_URL = "/documents";
@@ -29,6 +28,14 @@ export const uploadDocument = (title, documentType, file) => {
     return api.post(`${API_URL}/upload-text`, formData);
 };
 
-// Generate an AI summary
+// Generate an AI summary for a single document
 export const summarizeDocument = (id) =>
     api.post(`${API_URL}/${id}/summarize`);
+
+// Generate a consolidated AI summary across all user documents
+export const generateConsolidatedSummary = () =>
+    api.post(`${API_URL}/consolidated-summary`);
+
+// Ask questions about the user's health documents using RAG
+export const askRagQuestion = (question) =>
+    api.post(`${API_URL}/rag-qa`, { question });

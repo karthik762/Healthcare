@@ -237,4 +237,65 @@ public class HealthDocumentController {
             );
         }
     }
+
+    // Generate a single consolidated summary across all the user's documents
+    @PostMapping("/consolidated-summary")
+    public ResponseEntity<?> generateConsolidatedSummary() {
+        List<HealthDocument> documents = service.getAllDocuments();
+
+        if (documents.isEmpty()) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "No health documents found. Please upload or add a document first.")
+            );
+        }
+
+        try {
+            String summary = aiSummaryService.generateConsolidatedSummary(documents);
+            return ResponseEntity.ok(Map.of(
+                    "summary", summary,
+                    "documentCount", documents.size()
+            ));
+        } catch (Exception exception) {
+            return ResponseEntity.status(503).body(
+                    Map.of("error", "Could not generate consolidated summary. Check that Ollama is running.")
+            );
+        }
+    }
+
+    // Ask a question grounded in the user's documents using RAG
+    @PostMapping("/rag-qa")
+    public ResponseEntity<?> askQuestion(@RequestBody Map<String, String> request) {
+        String question = request != null ? request.get("question") : null;
+
+        if (question == null || question.trim().isBlank()) {
+            return ResponseEntity.badRequest().body(
+                    Map.of("error", "Please provide a question.")
+            );
+        }
+
+        List<HealthDocument> documents = service.getAllDocuments();
+
+        if (documents.isEmpty()) {
+            return ResponseEntity.ok(Map.of(
+                    "answer", "You have not uploaded or saved any health documents yet. Please add a document first so I can answer questions about your records.",
+                    "sources", List.of()
+            ));
+        }
+
+        try {
+            AiSummaryService.RagResponse ragResponse =
+                    aiSummaryService.answerQuestionWithRag(question.trim(), documents);
+
+            return ResponseEntity.ok(Map.of(
+                    "question", question.trim(),
+                    "answer", ragResponse.answer(),
+                    "sources", ragResponse.sources()
+            ));
+        } catch (Exception exception) {
+            return ResponseEntity.status(503).body(
+                    Map.of("error", "Failed to process question with Ollama. Check that Ollama is running.")
+            );
+        }
+    }
 }
+
