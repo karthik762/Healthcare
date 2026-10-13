@@ -7,9 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClient;
 
 import app.model.HealthDocument;
 
@@ -19,8 +21,8 @@ class AiSummaryServiceTest {
 
     @BeforeEach
     void setUp() {
-        // Point to unreachable port to test offline/fallback logic safely
-        aiSummaryService = new AiSummaryService("http://127.0.0.1:59999");
+        // Unauthenticated instance without API key to test offline/fallback logic safely
+        aiSummaryService = new AiSummaryService();
     }
 
     @Test
@@ -83,7 +85,7 @@ class AiSummaryServiceTest {
     }
 
     @Test
-    void answerQuestionWithRagGracefullyFallsBackWhenOllamaIsOffline() {
+    void answerQuestionWithRagGracefullyFallsBackWhenOffline() {
         HealthDocument doc = new HealthDocument();
         doc.setId(10L);
         doc.setTitle("Endocrine Consultation");
@@ -149,15 +151,21 @@ class AiSummaryServiceTest {
         String summary = aiSummaryService.generateConsolidatedSummary(List.of(doc1, doc2));
 
         assertNotNull(summary);
-        assertTrue(summary.contains("Overall Health Overview"));
-        assertTrue(summary.contains("Main Complaints or Conditions"));
-        assertTrue(summary.contains("Medications"));
+        assertTrue(summary.contains("Patient's Current Problem"));
+        assertTrue(summary.contains("Relevant Medical History"));
+        assertTrue(summary.contains("Possible Explanations"));
         assertTrue(summary.contains("Important Test Results"));
+        assertTrue(summary.contains("Current Medications and Documented Allergies"));
+        assertTrue(summary.contains("Missing Information"));
+        assertTrue(summary.contains("Suggested Next Steps"));
+        assertTrue(summary.contains("Lisinopril"));
+        assertTrue(summary.contains("Hemoglobin 13.8"));
     }
 
     @Test
-    void summarizeFallsBackToOfflinePreviewWhenOllamaOffline() {
+    void summarizeFallsBackToOfflinePreviewWhenServiceOffline() {
         String summary = aiSummaryService.summarize("Hemoglobin: 14.5 g/dL. Blood Sugar: 95 mg/dL.");
+
         assertNotNull(summary);
         assertTrue(summary.contains("DOCUMENT SUMMARY (OFFLINE PREVIEW)"));
         assertTrue(summary.contains("Hemoglobin: 14.5"));
@@ -188,13 +196,10 @@ class AiSummaryServiceTest {
                 Notes: Routine annual wellness screening.
                 """);
 
-        // When asking general summary question while Ollama is offline
         var response = aiSummaryService.answerQuestionWithRag("Summarize my latest blood test results.", List.of(bloodDoc));
 
         assertNotNull(response);
-        // The answer should clearly state AI answering is temporarily offline
-        assertTrue(response.answer().contains("temporarily unavailable") || response.answer().contains("offline"));
-        // Crucially, it must NOT dump the full 15-line raw metabolic panel verbatim as an AI answer
+        assertTrue(response.answer().toLowerCase().contains("offline") || response.answer().contains("OFFLINE") || response.answer().contains("temporarily unavailable"));
         assertFalse(response.answer().contains("Bilirubin: 0.8 mg/dL (0.1-1.2)."), "Must not dump raw document panel verbatim");
         assertFalse(response.answer().contains("Alkaline Phosphatase: 70 U/L"), "Must not dump full panel verbatim");
     }
@@ -226,7 +231,6 @@ class AiSummaryServiceTest {
         var response = aiSummaryService.answerQuestionWithRag("What medications are mentioned in my documents?", List.of(labDoc));
 
         assertNotNull(response);
-        // When asking about medications and only blood lab is provided
         assertTrue(response.answer().toLowerCase().contains("no medications") || response.answer().toLowerCase().contains("do not contain"),
                 "Should state no medications were found rather than returning the CBC report");
     }
@@ -266,5 +270,286 @@ class AiSummaryServiceTest {
         assertFalse(retrieved.isEmpty());
         assertEquals("Blood Test October", retrieved.get(0).documentTitle(),
                 "Query asking for 'latest' should prioritize the most recent document (ID 20)");
+    }
+
+    @Test
+    void answerQuestionWithRagPreventsDuplicateSourceCardsFromSameDocument() {
+        HealthDocument docWithMultipleSections = new HealthDocument();
+        docWithMultipleSections.setId(99L);
+        docWithMultipleSections.setTitle("Sample Blood Test Report");
+        docWithMultipleSections.setDocumentType("Blood Report");
+        docWithMultipleSections.setContent("""
+                Hematology Panel
+                Hemoglobin: 14.2 g/dL (Reference: 13.5 - 17.5 g/dL).
+                Hematocrit: 42.0%.
+                
+                Red Blood Cell Count
+                RBC: 4.8 M/uL (Reference: 4.5 - 5.9 M/uL).
+                MCV: 88 fL.
+                
+                White Blood Cell Differential
+                WBC: 6,800 /mcL (Reference: 4,500 - 11,000 /mcL).
+                Neutrophils: 60%.
+                """);
+
+        var response = aiSummaryService.answerQuestionWithRag("Summarize my latest blood test results.", List.of(docWithMultipleSections));
+
+        assertNotNull(response);
+        assertNotNull(response.sources());
+        long distinctSourceIds = response.sources().stream()
+                .map(s -> s.get("documentId"))
+                .distinct()
+                .count();
+        assertEquals(1, response.sources().size(), "Should have exactly 1 source entry for document 99, not duplicate cards");
+        assertEquals(distinctSourceIds, response.sources().size());
+        assertEquals("Sample Blood Test Report", response.sources().get(0).get("title"));
+    }
+
+    // --- Gemini Migration Specific Tests ---
+
+    @Test
+    void geminiConfigurationDefaultsAreVerified() {
+        AiSummaryService service = new AiSummaryService(
+                "",
+                "gemini-2.5-flash",
+                "https://generativelanguage.googleapis.com"
+        );
+        assertEquals("gemini-2.5-flash", service.getGeminiModel());
+        assertEquals("https://generativelanguage.googleapis.com", service.getGeminiBaseUrl());
+        assertFalse(service.hasGeminiApiKey());
+        assertEquals("gemini", service.getActiveProvider(), "Gemini is the single provider across the application");
+    }
+
+    @Test
+    void geminiProviderSelectedWhenKeyPresent() {
+        AiSummaryService service = new AiSummaryService(
+                "AIzaSyDummySecretKey123",
+                "gemini-2.5-flash",
+                "https://generativelanguage.googleapis.com"
+        );
+        assertTrue(service.hasGeminiApiKey());
+        assertEquals("gemini", service.getActiveProvider());
+    }
+
+    @Test
+    void extractGeminiTextParsesValidResponseStructure() {
+        Map<String, Object> mockGeminiResponse = Map.of(
+                "candidates", List.of(
+                        Map.of(
+                                "content", Map.of(
+                                        "parts", List.of(
+                                                Map.of("text", "The patient's hemoglobin is 14.2 g/dL, which is within the normal reference range.")
+                                        )
+                                )
+                        )
+                )
+        );
+
+        String parsedText = aiSummaryService.extractGeminiText(mockGeminiResponse);
+        assertEquals("The patient's hemoglobin is 14.2 g/dL, which is within the normal reference range.", parsedText);
+    }
+
+    @Test
+    void extractGeminiTextHandlesMalformedOrEmptyResponseSafely() {
+        assertThrows(RuntimeException.class, () -> aiSummaryService.extractGeminiText(null));
+        assertThrows(RuntimeException.class, () -> aiSummaryService.extractGeminiText(Map.of()));
+        assertThrows(RuntimeException.class, () -> aiSummaryService.extractGeminiText(Map.of("candidates", List.of())));
+    }
+
+    @Test
+    void geminiMissingKeyFallsBackCleanlyWithoutThrowing() {
+        // Missing key triggers safe fallback without hard crash or leaking sensitive data
+        AiSummaryService noKeyService = new AiSummaryService(
+                "",
+                "gemini-2.5-flash",
+                "https://generativelanguage.googleapis.com"
+        );
+
+        String summary = noKeyService.summarize("Fasting Blood Sugar: 90 mg/dL.");
+        assertNotNull(summary);
+        assertTrue(summary.contains("DOCUMENT SUMMARY (OFFLINE PREVIEW)"));
+    }
+
+    @Test
+    void generateAiTextThrowsIllegalStateExceptionWhenKeyMissing() {
+        AiSummaryService noKeyService = new AiSummaryService(
+                "",
+                "gemini-2.5-flash",
+                "https://generativelanguage.googleapis.com"
+        );
+        assertThrows(IllegalStateException.class, () -> noKeyService.generateAiText("Test prompt"));
+    }
+
+    @Test
+    void generateConsolidatedSummaryCombinesIntakeResponsesWithDocumentFacts() {
+        HealthDocument doc = new HealthDocument();
+        doc.setId(10L);
+        doc.setTitle("Prescription Slip");
+        doc.setDocumentType("Prescription");
+        doc.setContent("Rx: Metformin 500mg twice daily with meals.");
+
+        String intakeConversation = """
+                Assistant: Hello! What brings you in today?
+                Patient: I have had persistent fatigue and dizziness for 3 days.
+                Assistant: Are you taking any medications?
+                Patient: Yes, Metformin for my diabetes.
+                """;
+
+        String summary = aiSummaryService.generateConsolidatedSummary(List.of(doc), intakeConversation);
+
+        assertNotNull(summary);
+        assertTrue(summary.contains("persistent fatigue and dizziness"), "Patient intake symptoms must be captured under Patient's Current Problem");
+        assertTrue(summary.contains("Metformin 500mg"), "Uploaded document prescription must be captured under Current Medications");
+        assertTrue(summary.contains("1. Patient's Current Problem"));
+        assertTrue(summary.contains("8. Suggested Next Steps"));
+    }
+
+    @Test
+    void generateConsolidatedSummaryIncludesEmergencyWarningAndNoDefinitiveDiagnosis() {
+        HealthDocument doc = new HealthDocument();
+        doc.setId(11L);
+        doc.setTitle("Lab Work");
+        doc.setDocumentType("Blood Report");
+        doc.setContent("Fasting Glucose: 110 mg/dL.");
+
+        String summary = aiSummaryService.generateConsolidatedSummary(List.of(doc), "");
+
+        assertNotNull(summary);
+        assertTrue(summary.contains("Possible Explanations (not a diagnosis)"));
+        assertTrue(summary.contains("Findings That Support or Do Not Support Each Possibility"));
+        assertTrue(summary.contains("EMERGENCY WARNING"), "Summary must provide emergency warning signs and safety guidance");
+        assertTrue(summary.contains("Do not delay urgent care"), "Summary must instruct not to delay urgent care");
+        assertTrue(summary.contains("Do not start, stop, or adjust any medications"), "Must instruct not to change medications independently");
+    }
+
+    @Test
+    void generateConsolidatedSummaryFiltersOutDisclaimersAndWarningsFromMedicalHistory() {
+        HealthDocument doc = new HealthDocument();
+        doc.setId(13L);
+        doc.setTitle("Lab Work with Disclaimer");
+        doc.setDocumentType("Lab Report");
+        doc.setContent("""
+                Patient: Jane Doe
+                Disclaimer: This is fabricated test data for demonstration purposes only.
+                Confidentiality Notice: For reference only.
+                Past Medical History: Diagnosed with Asthma in 2021.
+                Test: Fasting Glucose 95 mg/dL.
+                """);
+
+        String summary = aiSummaryService.generateConsolidatedSummary(List.of(doc), "");
+
+        assertNotNull(summary);
+        assertTrue(summary.contains("Diagnosed with Asthma"), "Asthma should be captured under Medical History");
+        assertFalse(summary.contains("fabricated test data (from"), "Disclaimers/fabricated data notices must not be classified as patient medical conditions");
+        assertFalse(summary.contains("Confidentiality Notice (from"), "Confidentiality notices must not be classified as patient medical conditions");
+    }
+
+    @Test
+    void providerSelectionReflectsKeyPresenceAndDistinguishesOfflineReason() {
+        AiSummaryService noKeyService = new AiSummaryService(
+                "",
+                "gemini-2.5-flash",
+                "https://generativelanguage.googleapis.com"
+        );
+        assertEquals("gemini", noKeyService.getActiveProvider());
+        assertFalse(noKeyService.hasGeminiApiKey());
+
+        HealthDocument doc = new HealthDocument();
+        doc.setId(14L);
+        doc.setTitle("Test Doc");
+        doc.setContent("History of Hypertension.");
+
+        String summaryNoKey = noKeyService.generateConsolidatedSummary(List.of(doc), "");
+        assertTrue(summaryNoKey.contains("GEMINI_API_KEY is not configured"), "Fallback should clearly state that GEMINI_API_KEY is not configured");
+
+        AiSummaryService withKeyService = new AiSummaryService(
+                "dummy-key",
+                "gemini-2.5-flash",
+                "http://127.0.0.1:59999",
+                null
+        );
+        assertEquals("gemini", withKeyService.getActiveProvider());
+        assertTrue(withKeyService.hasGeminiApiKey());
+
+        String summaryWithKey = withKeyService.generateConsolidatedSummary(List.of(doc), "");
+        assertTrue(summaryWithKey.contains("AI Service Status:"), "Fallback should state the diagnosed AI Service Status");
+    }
+
+    @Test
+    void ragQaReturnsGroundedGeminiAnswerWhenAiServiceSucceeds() {
+        HealthDocument doc = new HealthDocument();
+        doc.setId(20L);
+        doc.setTitle("Blood Panel");
+        doc.setDocumentType("Lab Report");
+        doc.setContent("Fasting Glucose: 92 mg/dL. Normal.");
+
+        AiSummaryService service = new AiSummaryService(
+                "dummy-key",
+                "gemini-2.5-flash",
+                "https://generativelanguage.googleapis.com"
+        ) {
+            @Override
+            public String generateAiText(String prompt) {
+                return "Your fasting glucose was 92 mg/dL, which is within normal limits according to the Blood Panel.";
+            }
+        };
+
+        var response = service.answerQuestionWithRag("What was my fasting glucose?", List.of(doc));
+        assertNotNull(response);
+        assertEquals("Your fasting glucose was 92 mg/dL, which is within normal limits according to the Blood Panel.", response.answer());
+        assertFalse(response.sources().isEmpty());
+        assertEquals("Blood Panel", response.sources().get(0).get("title"));
+    }
+
+    @Test
+    void ragQaDiagnosesModelNotFoundOrOfflineReasonHonestlyInFallback() {
+        HealthDocument doc = new HealthDocument();
+        doc.setId(21L);
+        doc.setTitle("Lab Work");
+        doc.setDocumentType("Lab Report");
+        doc.setContent("Hemoglobin: 13.5 g/dL.");
+
+        AiSummaryService service = new AiSummaryService(
+                "dummy-key",
+                "unsupported-model-x",
+                "http://127.0.0.1:59999",
+                null
+        );
+
+        var response = service.answerQuestionWithRag("What was my hemoglobin?", List.of(doc));
+        assertNotNull(response);
+        assertTrue(response.answer().contains("OFFLINE RETRIEVAL"));
+        assertTrue(response.answer().contains("Source: Lab Work"));
+    }
+
+    @Test
+    void checkGeminiConnectivityReportsUnconfiguredKeySafely() {
+        AiSummaryService noKeyService = new AiSummaryService(
+                "",
+                "gemini-2.5-flash",
+                "https://generativelanguage.googleapis.com"
+        );
+
+        var result = noKeyService.checkGeminiConnectivity();
+        assertNotNull(result);
+        assertFalse(result.successful());
+        assertEquals("gemini-2.5-flash", result.model());
+        assertTrue(result.message().contains("GEMINI_API_KEY is not configured"));
+    }
+
+    @Test
+    void checkGeminiConnectivityHandlesConnectionFailureGracefully() {
+        AiSummaryService unreachableService = new AiSummaryService(
+                "dummy-test-key",
+                "gemini-2.5-flash",
+                "http://127.0.0.1:59999",
+                null
+        );
+
+        var result = unreachableService.checkGeminiConnectivity();
+        assertNotNull(result);
+        assertFalse(result.successful());
+        assertEquals("gemini-2.5-flash", result.model());
+        assertTrue(result.message().contains("Connection failure") || result.message().contains("HTTP"));
     }
 }

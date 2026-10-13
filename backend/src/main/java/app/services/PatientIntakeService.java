@@ -19,17 +19,15 @@ public class PatientIntakeService {
 
     private final PatientIntakeRepository repository;
     private final UserRepository userRepository;
-    private final RestClient restClient;
-    private final String ollamaBaseUrl;
+    private final AiSummaryService aiSummaryService;
 
     public PatientIntakeService(
             PatientIntakeRepository repository,
             UserRepository userRepository,
-            @Value("${app.ollama.base-url:http://localhost:11434}") String ollamaBaseUrl) {
+            AiSummaryService aiSummaryService) {
         this.repository = repository;
         this.userRepository = userRepository;
-        this.restClient = RestClient.create();
-        this.ollamaBaseUrl = ollamaBaseUrl;
+        this.aiSummaryService = aiSummaryService;
     }
 
     // Get the currently logged-in user
@@ -80,6 +78,16 @@ public class PatientIntakeService {
                                 "Patient intake session not found."));
     }
 
+    // Retrieve the most recent intake session belonging to the logged-in user
+    public java.util.Optional<PatientIntakeSession> getLatestSessionForCurrentUser() {
+        User user = getCurrentUser();
+        var sessions = repository.findAllByUser_IdOrderByCreatedAtDesc(user.getId());
+        if (sessions == null || sessions.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(sessions.get(0));
+    }
+
     // Send a message in the user's own session
     public String sendMessage(Long id, String message) {
         PatientIntakeSession session = getSession(id);
@@ -124,60 +132,36 @@ public class PatientIntakeService {
         }
 
         String prompt =
-                "You are a patient intake assistant helping collect "
-                + "information for a doctor. You must not diagnose "
-                + "illnesses or prescribe treatment.\n\n"
+                "You are an empathetic, clinical patient intake assistant collecting preliminary information for a doctor. "
+                + "You must NEVER diagnose illnesses, recommend medications, or advise changing treatments.\n\n"
 
-                + "IMPORTANT RULES:\n"
-                + "1. Read the entire conversation before responding.\n"
-                + "2. The LAST Patient message is the newest information.\n"
-                + "3. Respond directly to the newest patient message.\n"
-                + "4. Never repeat a question already asked if the patient "
-                + "has answered it.\n"
-                + "5. Ask exactly ONE relevant follow-up question.\n"
-                + "6. Choose the next question based on information that "
-                + "is still missing.\n"
-                + "7. Gather onset, duration, location, severity, "
-                + "progression, related symptoms, medical history, "
-                + "medicines and allergies when appropriate.\n"
-                + "8. Use simple, respectful language.\n"
-                + "9. Do not recommend medicines or claim the patient "
-                + "is safe.\n"
-                + "10. If the patient describes a possible emergency, "
-                + "advise immediate medical attention.\n"
-                + "11. Return only your next question or necessary "
-                + "safety guidance.\n\n"
+                + "CLINICAL GUIDELINES:\n"
+                + "1. Review the full conversation history. The LAST patient message is the newest information.\n"
+                + "2. Adapt dynamically to the patient's specific complaint (e.g. for headache: ask location, onset, light sensitivity; for stomach pain: ask location, meal timing, digestive symptoms; for cough/fever: ask duration, temperature, phlegm).\n"
+                + "3. Ask exactly ONE clear, focused follow-up question at a time.\n"
+                + "4. Never repeat a question the patient already answered.\n"
+                + "5. Systematically cover key missing details when appropriate: onset, duration, location, severity (1-10), progression, associated symptoms, past medical history, current medicines, and allergies.\n"
+                + "6. If sufficient details are collected, inform the patient that their intake details are ready for the doctor and encourage them to click 'Generate Doctor Summary'.\n"
+                + "7. If the patient reports emergency red-flag symptoms (severe chest pain, inability to breathe, sudden confusion, stroke signs, uncontrollable bleeding), immediately urge them to seek emergency care.\n"
+                + "8. Keep the response concise, respectful, and conversational.\n\n"
 
                 + "CONVERSATION HISTORY:\n"
                 + conversation
-                + "\n\nYour response to the latest patient message:";
+                + "\n\nNext focused intake question for the patient:";
 
         String reply = "";
 
         try {
-            Map<?, ?> response = restClient.post()
-                    .uri(ollamaBaseUrl + "/api/generate")
-                    .body(Map.of(
-                            "model", "llama3.2:3b",
-                            "prompt", prompt,
-                            "stream", false,
-                            "options", Map.of(
-                                    "temperature", 0.4,
-                                    "repeat_penalty", 1.2
-                            )
-                    ))
-                    .retrieve()
-                    .body(Map.class);
-
-            if (response != null && response.get("response") != null) {
-                reply = response.get("response").toString().trim();
+            reply = aiSummaryService.generateAiText(prompt);
+            if (reply != null) {
+                reply = reply.trim();
             }
         } catch (Exception exception) {
-            // Ollama is offline or unreachable; use guided clinical intake questionnaire fallback
+            // Gemini is offline, key missing, or unreachable; use adaptive rule-based clinical intake fallback
             reply = generateFallbackIntakeQuestion(conversation);
         }
 
-        if (reply.isEmpty()) {
+        if (reply == null || reply.isBlank()) {
             reply = generateFallbackIntakeQuestion(conversation);
         }
 
@@ -205,19 +189,18 @@ public class PatientIntakeService {
         }
 
         String prompt =
-                "Create a concise, structured patient intake summary "
-                + "for a doctor using only the conversation below.\n\n"
+                "Create a concise, structured patient intake summary for a attending physician using ONLY the dialogue below.\n\n"
 
-                + "RULES:\n"
-                + "1. Use only information explicitly provided by the patient.\n"
-                + "2. Do not invent details or make a diagnosis.\n"
-                + "3. Do not recommend medicines or treatments.\n"
-                + "4. Mark missing information as Not provided.\n"
-                + "5. Clearly distinguish reported symptoms from confirmed facts.\n"
-                + "6. Include warning signs mentioned in the conversation.\n"
-                + "7. Do not claim that the patient is safe or stable.\n\n"
+                + "CLINICAL SUMMARY RULES:\n"
+                + "1. Use only information explicitly stated by the patient.\n"
+                + "2. Do not invent details, infer unstated symptoms, or make a diagnosis.\n"
+                + "3. Do not recommend medicines, dosages, or treatments.\n"
+                + "4. Mark missing clinical information explicitly as 'Not provided by patient'.\n"
+                + "5. Clearly distinguish reported symptoms from confirmed medical facts.\n"
+                + "6. Include any warning signs or red-flags reported during the chat.\n"
+                + "7. Do not declare that the patient is safe or stable.\n\n"
 
-                + "Use these headings:\n"
+                + "Use EXACTLY these nine numbered headings:\n"
                 + "PATIENT INTAKE SUMMARY\n"
                 + "1. Chief Complaint\n"
                 + "2. History of Present Illness\n"
@@ -229,41 +212,23 @@ public class PatientIntakeService {
                 + "8. Important Warning Signs Reported\n"
                 + "9. Missing Information / Follow-up Questions\n\n"
 
-                + "For warning signs, list only those reported in the "
-                + "conversation. If none were mentioned, write "
-                + "'None reported in the conversation'.\n\n"
-
-                + "Conversation:\n"
+                + "Conversation Transcript:\n"
                 + session.getConversation();
 
         String summary = "";
 
         try {
-            Map<?, ?> response = restClient.post()
-                    .uri(ollamaBaseUrl + "/api/generate")
-                    .body(Map.of(
-                            "model", "llama3.2:3b",
-                            "prompt", prompt,
-                            "stream", false,
-                            "options", Map.of(
-                                    "temperature", 0.2,
-                                    "repeat_penalty", 1.2,
-                                    "num_predict", 700
-                            )
-                    ))
-                    .retrieve()
-                    .body(Map.class);
-
-            if (response != null && response.get("response") != null) {
-                summary = response.get("response").toString().trim();
+            summary = aiSummaryService.generateAiText(prompt);
+            if (summary != null) {
+                summary = summary.trim();
             }
         } catch (Exception exception) {
-            // Ollama is offline or unreachable; generate structured clinical summary from recorded session
-            summary = generateFallbackDoctorSummary(session);
+            // Gemini offline or unconfigured; generate structured clinical summary from recorded session
+            summary = generateFallbackDoctorSummary(session, exception.getMessage());
         }
 
-        if (summary.isEmpty()) {
-            summary = generateFallbackDoctorSummary(session);
+        if (summary == null || summary.isBlank()) {
+            summary = generateFallbackDoctorSummary(session, "Empty response from Gemini AI");
         }
 
         session.setDoctorSummary(summary);
@@ -274,8 +239,9 @@ public class PatientIntakeService {
         return summary;
     }
 
-    // Step-by-step clinical intake fallback when LLM is unavailable
+    // Adaptive step-by-step clinical intake fallback when Gemini is unavailable
     private String generateFallbackIntakeQuestion(String conversation) {
+        String lowerConv = conversation.toLowerCase();
         int patientCount = 0;
         int idx = 0;
         while ((idx = conversation.indexOf("\nPatient:", idx)) != -1) {
@@ -283,29 +249,52 @@ public class PatientIntakeService {
             idx += 9;
         }
 
-        switch (patientCount) {
-            case 1:
-                return "Thank you for explaining what brings you in. "
-                        + "Approximately when did these symptoms begin, and how severe is the discomfort on a scale of 1 to 10?";
-            case 2:
-                return "Thank you. Are you experiencing any associated symptoms (such as fever, nausea, dizziness, chills, or fatigue)?";
-            case 3:
-                return "Noted. Do you have any pre-existing medical conditions (such as high blood pressure, diabetes, or asthma), and are you currently taking any prescription or regular medications?";
-            case 4:
-                return "Understood. Do you have any known allergies to medications, foods, or other substances?";
-            default:
-                return "Thank you. I have recorded all this essential information for your medical team. "
-                        + "Is there any additional detail you would like the doctor to know? "
-                        + "When you are ready, you can click 'Generate Doctor Summary' to review the structured intake report.";
+        // Tailor follow-up questions to the specific complaint when available
+        boolean mentionsHeadache = lowerConv.contains("headache") || lowerConv.contains("migraine") || lowerConv.contains("head pain");
+        boolean mentionsStomach = lowerConv.contains("stomach") || lowerConv.contains("abdominal") || lowerConv.contains("belly") || lowerConv.contains("nausea");
+        boolean mentionsChestOrBreathing = lowerConv.contains("chest") || lowerConv.contains("cough") || lowerConv.contains("breath") || lowerConv.contains("fever");
+
+        if (patientCount == 1) {
+            if (mentionsHeadache) {
+                return "Thank you for explaining. Where is the headache located (e.g. temples, forehead, one side), and how severe is the pain on a scale of 1 to 10?";
+            } else if (mentionsStomach) {
+                return "Thank you for letting me know. Where in your abdomen is the discomfort located, and does it feel sharper before or after meals?";
+            } else if (mentionsChestOrBreathing) {
+                return "Understood. When did this begin, and are you having any fever, chills, or difficulty catching your breath?";
+            } else {
+                return "Thank you for explaining what brings you in. Approximately when did these symptoms begin, and how severe is the discomfort on a scale of 1 to 10?";
+            }
+        } else if (patientCount == 2) {
+            if (mentionsHeadache && !lowerConv.contains("vision") && !lowerConv.contains("light")) {
+                return "Noted. Are you noticing any sensitivity to light or sound, nausea, or visual changes with this headache?";
+            } else if (mentionsStomach && !lowerConv.contains("vomit") && !lowerConv.contains("bowel")) {
+                return "Thank you. Have you experienced any vomiting, fever, or changes in your bowel habits?";
+            } else {
+                return "Thank you. Are you experiencing any other associated symptoms (such as fever, dizziness, nausea, or unusual fatigue)?";
+            }
+        } else if (patientCount == 3) {
+            return "Noted. Do you have any pre-existing medical conditions (such as high blood pressure, diabetes, or asthma), and are you currently taking any prescription or regular medications?";
+        } else if (patientCount == 4) {
+            return "Understood. Do you have any known allergies to medications, foods, or other substances?";
+        } else {
+            return "Thank you. I have recorded these details for your doctor. Is there any additional detail you would like the doctor to know? When you are ready, please click 'Generate Doctor Summary' to compile your intake report.";
         }
     }
 
-    // Structured summary fallback using the gathered conversation history
     private String generateFallbackDoctorSummary(PatientIntakeSession session) {
+        return generateFallbackDoctorSummary(session, "");
+    }
+
+    private String generateFallbackDoctorSummary(PatientIntakeSession session, String failureReason) {
         String conv = session.getConversation() == null ? "" : session.getConversation();
 
         StringBuilder sb = new StringBuilder();
-        sb.append("PATIENT INTAKE SUMMARY\n\n");
+        sb.append("PATIENT INTAKE SUMMARY (OFFLINE MODE)\n");
+        if (failureReason != null && !failureReason.isBlank()) {
+            sb.append("AI Service Status: ").append(failureReason).append("\n\n");
+        } else {
+            sb.append("Note: Generated from recorded patient intake responses because Gemini AI is currently offline or unconfigured.\n\n");
+        }
 
         sb.append("1. Chief Complaint\n");
         int firstPatient = conv.indexOf("\nPatient: ");
@@ -341,7 +330,7 @@ public class PatientIntakeService {
         sb.append("None reported in the conversation.\n\n");
 
         sb.append("9. Missing Information / Follow-up Questions\n");
-        sb.append("Review full clinical history and vital signs during physician examination.\n\n");
+        sb.append("Review full clinical history, allergies, and vital signs during physician examination.\n\n");
 
         sb.append("--- INTAKE CONVERSATION TRANSCRIPT ---\n");
         sb.append(conv.trim());

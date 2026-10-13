@@ -61,6 +61,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             } catch (Exception exception) {
                 // Invalid or expired tokens are treated as unauthenticated.
+                org.slf4j.LoggerFactory.getLogger(JwtAuthenticationFilter.class)
+                        .debug("JWT authentication filter rejected token: {}", exception.getMessage());
             }
         }
 

@@ -97,8 +97,14 @@ function App() {
         try {
             const response = await getDocuments();
             setDocuments(response.data);
-        } catch {
-            setMessage("Could not load documents. Check the backend connection.");
+        } catch (error) {
+            const status = error.response?.status;
+            if (status === 401 || status === 403) {
+                setMessage("Your session is expired or invalid for this local backend. Please sign in again.");
+                handleLogout();
+            } else {
+                setMessage("Could not load documents. Check the backend connection.");
+            }
         } finally {
             setLoading(false);
         }
@@ -273,7 +279,7 @@ function App() {
         } catch (error) {
             setMessage(
                 error.response?.data?.error ||
-                "Could not generate summary. Check that Ollama is running."
+                "Could not generate summary. Check that Gemini AI service is configured and reachable."
             );
         } finally {
             setSummarizingId(null);
@@ -297,7 +303,7 @@ function App() {
         } catch (error) {
             setConsolidatedError(
                 error.response?.data?.error ||
-                "Failed to generate consolidated summary. Check that Ollama is running."
+                "Failed to generate consolidated summary. Check AI service connectivity."
             );
         } finally {
             setConsolidatedLoading(false);
@@ -332,7 +338,7 @@ function App() {
         } catch (error) {
             setQaError(
                 error.response?.data?.error ||
-                "Could not retrieve answer. Check backend and Ollama connectivity."
+                "Could not retrieve answer. Check backend and AI service connectivity."
             );
         } finally {
             setQaLoading(false);
@@ -704,7 +710,7 @@ function App() {
                                 <div>
                                     <h3 className="section-title">Consolidated AI Health Summary</h3>
                                     <p className="section-desc">
-                                        Synthesized from all your available medical records by local Ollama model (llama3.2:3b).
+                                        Synthesized from all your available medical records by your clinical AI assistant.
                                     </p>
                                 </div>
 
@@ -730,7 +736,7 @@ function App() {
                                     <div className="lycoris-spinner" style={{ width: 28, height: 28 }} />
                                     <div style={{ marginTop: 14 }}>
                                         <strong>Generating Consolidated Summary...</strong>
-                                        <p>Analyzing {documents.length} document(s) with Ollama. This takes a few moments.</p>
+                                        <p>Synthesizing your {documents.length} document(s) and intake responses with your clinical AI assistant. This takes a few moments.</p>
                                     </div>
                                 </div>
                             ) : consolidatedSummary ? (
@@ -852,10 +858,14 @@ function App() {
                                                 <h4 className="rag-question-text">{entry.question}</h4>
                                             </div>
 
-                                            {/* Ollama Grounded Answer */}
+                                            {/* Grounded Answer or Offline Status */}
                                             <div className="rag-answer-row">
                                                 <div className="rag-ai-tag">
-                                                    <span className="ai-chip">OLLAMA RAG ANSWER</span>
+                                                    <span className={entry.answer?.includes("OFFLINE RETRIEVAL") || entry.answer?.includes("temporarily unavailable") || entry.answer?.includes("temporarily offline") ? "ai-chip offline-tag" : "ai-chip"}>
+                                                        {entry.answer?.includes("OFFLINE RETRIEVAL") || entry.answer?.includes("temporarily unavailable") || entry.answer?.includes("temporarily offline")
+                                                            ? "OFFLINE RETRIEVAL (FALLBACK)"
+                                                            : "GEMINI AI CLINICAL ANSWER"}
+                                                    </span>
                                                 </div>
                                                 <div className="rag-answer-content">
                                                     {entry.answer}
@@ -905,7 +915,7 @@ function App() {
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     <h2>Document Summary</h2>
-                                    <p>Individual document analysis via Ollama (llama3.2:3b).</p>
+                                    <p>Individual document analysis via clinical AI assistant.</p>
                                     <div className="full-content">{singleSummary}</div>
                                     <div className="form-actions">
                                         <button

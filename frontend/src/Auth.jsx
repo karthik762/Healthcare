@@ -1,6 +1,7 @@
 import { useState } from "react";
 import api from "./api";
 import { LycorisMark } from "./components/LycorisMark";
+import LycorisBackgroundFlower from "./components/LycorisBackgroundFlower";
 import "./Auth.css";
 
 function Auth({ onLogin }) {
@@ -41,7 +42,7 @@ function Auth({ onLogin }) {
                 responseMessage ||
                 (error.response?.status === 409
                     ? "An account with this email already exists."
-                    : "Unable to sign in. Check your details and backend connection.")
+                    : "Unable to sign in. Please verify your credentials and backend connection.")
             );
         } finally {
             setLoading(false);
@@ -50,9 +51,12 @@ function Auth({ onLogin }) {
 
     return (
         <div className="lycoris-auth-experience">
-            {/* Ambient atmospheric red chrome bloom */}
+            {/* Ambient atmospheric red bloom */}
             <div className="lycoris-ambient-glow" aria-hidden="true" />
             <div className="lycoris-ambient-glow-secondary" aria-hidden="true" />
+
+            {/* Decorative Subtle Lycoris Red Spider Lily Background */}
+            <LycorisBackgroundFlower opacity={0.42} />
 
             {/* Top Bar */}
             <header className="lycoris-auth-topbar">
@@ -60,7 +64,7 @@ function Auth({ onLogin }) {
                     <LycorisMark size={30} />
                     <span className="lycoris-brand-title">HEALTHSUMMARIZER</span>
                     <span className="lycoris-brand-divider">/</span>
-                    <span className="lycoris-brand-edition">CLINICAL INTELLIGENCE</span>
+                    <span className="lycoris-brand-edition">DOCUMENT MANAGER & AI</span>
                 </div>
             </header>
 
@@ -70,36 +74,35 @@ function Auth({ onLogin }) {
                 <section className="lycoris-hero-pane">
                     <div className="lycoris-badge">
                         <span className="lycoris-badge-dot" />
-                        <span>LYCORIS BOTANICAL EDITION • AI HEALTH SYSTEM</span>
+                        <span>THIRD-YEAR CSE PROJECT • HEALTHSUMMARIZER</span>
                     </div>
 
                     <h1 className="lycoris-hero-title">
-                        Your Health,<br />
-                        <span className="lycoris-highlight-title">in a Different Light.</span>
+                        Your Health Documents,<br />
+                        <span className="lycoris-highlight-title">Clearly Summarized.</span>
                     </h1>
 
                     <p className="lycoris-hero-lead">
-                        A dark editorial clinical intelligence workspace. Securely archive laboratory reports,
-                        generate instant AI medical syntheses, and triage symptoms through an intuitive,
-                        compassionate intake assistant.
+                        A clean, secure web application to manage personal health records, extract text
+                        from lab reports and prescriptions, and generate structured clinical summaries with an intelligent AI assistant.
                     </p>
 
                     {/* Feature Pillars */}
                     <div className="lycoris-pillars-grid">
                         <div className="lycoris-pillar">
                             <span className="pillar-num">01</span>
-                            <h4>Clinical Synthesis</h4>
-                            <p>Upload blood reports or TXT notes for instant key findings extraction.</p>
+                            <h4>Document Archive</h4>
+                            <p>Store, view, and edit medical reports with secure user-isolated access.</p>
                         </div>
                         <div className="lycoris-pillar">
                             <span className="pillar-num">02</span>
-                            <h4>Patient Intake</h4>
-                            <p>Guided clinical triage preparing clear summaries for your doctor.</p>
+                            <h4>AI Summarization</h4>
+                            <p>Generate unified, patient-centered summaries combining records and intake symptoms.</p>
                         </div>
                         <div className="lycoris-pillar">
                             <span className="pillar-num">03</span>
-                            <h4>Private Archive</h4>
-                            <p>Protected health record repository with JWT authorization.</p>
+                            <h4>Patient Intake</h4>
+                            <p>Guided pre-consultation questions with emergency keyword safety checks.</p>
                         </div>
                     </div>
                 </section>
@@ -136,11 +139,11 @@ function Auth({ onLogin }) {
                         </div>
 
                         <div className="lycoris-form-header">
-                            <h2>{isRegister ? "Begin Your Medical Archive" : "Access Your Sanctuary"}</h2>
+                            <h2>{isRegister ? "Create an Account" : "Welcome Back"}</h2>
                             <p>
                                 {isRegister
-                                    ? "Set up your private HealthSummarizer account to securely organize records."
-                                    : "Enter your registered credentials to access your health documents."}
+                                    ? "Register with your name and email to start managing your health documents."
+                                    : "Enter your registered email and password to access your documents."}
                             </p>
                         </div>
 
@@ -156,7 +159,7 @@ function Auth({ onLogin }) {
                                         type="text"
                                         value={name}
                                         onChange={(e) => setName(e.target.value)}
-                                        placeholder="e.g. Dr. Eleanor Vance"
+                                        placeholder="e.g. John Doe"
                                         required
                                         maxLength={100}
                                         autoComplete="name"
@@ -174,7 +177,7 @@ function Auth({ onLogin }) {
                                     type="email"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="name@example.com"
+                                    placeholder="user@example.com"
                                     required
                                     maxLength={150}
                                     autoComplete="email"
@@ -214,19 +217,19 @@ function Auth({ onLogin }) {
                                 {loading ? (
                                     <span className="btn-loading-flex">
                                         <span className="lycoris-spinner" />
-                                        <span>Communicating with Clinical Vault...</span>
+                                        <span>Signing in...</span>
                                     </span>
                                 ) : isRegister ? (
-                                    "Create Account →"
+                                    "Register Account →"
                                 ) : (
-                                    "Sign In to HealthSummarizer →"
+                                    "Sign In →"
                                 )}
                             </button>
                         </form>
 
                         <div className="lycoris-form-footer">
                             <span className="footer-prompt">
-                                {isRegister ? "Already registered?" : "New to HealthSummarizer?"}
+                                {isRegister ? "Already registered?" : "New user?"}
                             </span>
                             <button
                                 type="button"
@@ -236,7 +239,7 @@ function Auth({ onLogin }) {
                                     setMessage("");
                                 }}
                             >
-                                {isRegister ? "Sign In Instead" : "Create a Free Account"}
+                                {isRegister ? "Sign In Instead" : "Create Account"}
                             </button>
                         </div>
                     </div>

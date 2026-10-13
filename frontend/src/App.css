@@ -764,15 +764,26 @@
 
 .consolidated-content-box {
     white-space: pre-wrap;
-    line-height: 1.75;
-    font-size: 14px;
+    line-height: 1.8;
+    font-size: 14.5px;
     color: var(--text-ivory, #F2EBDD);
     background: #0B0B0B;
-    border: 1px solid rgba(242, 235, 221, 0.06);
-    border-radius: 10px;
-    padding: 24px;
-    max-height: 520px;
+    border: 1px solid rgba(242, 235, 221, 0.08);
+    border-radius: 12px;
+    padding: 26px 28px;
+    max-height: 560px;
     overflow-y: auto;
+    font-family: inherit;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.consolidated-content-box::-webkit-scrollbar {
+    width: 6px;
+}
+
+.consolidated-content-box::-webkit-scrollbar-thumb {
+    background: rgba(227, 19, 27, 0.3);
+    border-radius: 9999px;
 }
 
 .summary-disclaimer-box {
@@ -958,6 +969,10 @@
     letter-spacing: 0.12em;
     font-weight: 700;
     color: var(--accent-crimson, #E3131B);
+}
+
+.ai-chip.offline-tag {
+    color: #E5A83B;
 }
 
 .rag-answer-content {

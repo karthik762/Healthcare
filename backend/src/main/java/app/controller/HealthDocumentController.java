@@ -23,8 +23,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import app.model.HealthDocument;
+import app.model.PatientIntakeSession;
 import app.services.AiSummaryService;
 import app.services.HealthDocumentService;
+import app.services.PatientIntakeService;
 
 @RestController
 @RequestMapping("/api/documents")
@@ -32,13 +34,16 @@ public class HealthDocumentController {
 
     private final HealthDocumentService service;
     private final AiSummaryService aiSummaryService;
+    private final PatientIntakeService patientIntakeService;
 
     public HealthDocumentController(
             HealthDocumentService service,
-            AiSummaryService aiSummaryService) {
+            AiSummaryService aiSummaryService,
+            PatientIntakeService patientIntakeService) {
 
         this.service = service;
         this.aiSummaryService = aiSummaryService;
+        this.patientIntakeService = patientIntakeService;
     }
 
     // Return only the fields required by the frontend
@@ -232,19 +237,17 @@ public class HealthDocumentController {
             );
 
         } catch (Exception exception) {
-
             return ResponseEntity.status(503).body(
                     Map.of(
                             "error",
                             "Could not generate the summary. "
-                                    + "Check that Ollama is running "
-                                    + "and the model is available."
+                                    + "Please verify that the Gemini AI service is configured and reachable."
                     )
             );
         }
     }
 
-    // Generate a single consolidated summary across all the user's documents
+    // Generate a single consolidated summary across all the user's documents and intake responses
     @PostMapping("/consolidated-summary")
     public ResponseEntity<?> generateConsolidatedSummary() {
         List<HealthDocument> documents = service.getAllDocuments();
@@ -255,15 +258,21 @@ public class HealthDocumentController {
             );
         }
 
+        // Fetch patient's latest intake conversation to combine symptoms with uploaded documents
+        String intakeConversation = patientIntakeService.getLatestSessionForCurrentUser()
+                .map(PatientIntakeSession::getConversation)
+                .orElse("");
+
         try {
-            String summary = aiSummaryService.generateConsolidatedSummary(documents);
+            String summary = aiSummaryService.generateConsolidatedSummary(documents, intakeConversation);
             return ResponseEntity.ok(Map.of(
                     "summary", summary,
-                    "documentCount", documents.size()
+                    "documentCount", documents.size(),
+                    "hasIntakeData", !intakeConversation.isBlank()
             ));
         } catch (Exception exception) {
             return ResponseEntity.status(503).body(
-                    Map.of("error", "Could not generate consolidated summary. Check that Ollama is running.")
+                    Map.of("error", "Could not generate consolidated summary. Check AI service connectivity.")
             );
         }
     }
@@ -299,9 +308,22 @@ public class HealthDocumentController {
             ));
         } catch (Exception exception) {
             return ResponseEntity.status(503).body(
-                    Map.of("error", "Failed to process question with Ollama. Check that Ollama is running.")
+                    Map.of("error", "Failed to process question with AI service. Please check AI service connectivity.")
             );
         }
+    }
+
+    // Diagnostic endpoint to securely check Gemini AI connectivity without exposing credentials
+    @GetMapping("/ai-diagnostic")
+    public ResponseEntity<?> checkAiStatus() {
+        var result = aiSummaryService.checkGeminiConnectivity();
+        return ResponseEntity.ok(Map.of(
+                "successful", result.successful(),
+                "statusCode", result.statusCode(),
+                "model", result.model(),
+                "message", result.message(),
+                "snippetPresent", result.generatedSnippet() != null
+        ));
     }
 }
 
